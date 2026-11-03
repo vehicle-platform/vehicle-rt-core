@@ -312,6 +312,7 @@ void derived_ride_close(derived_ride_t* r, uint32_t now_ms)
         o->stamp_ms = now_ms;
         o->seq++;
     }
+    r->prev_counter = r->counter;
     r->have_prev = true;
     r->open = false;
     r->closed_count++;

@@ -1254,6 +1254,15 @@ derived_nc_reason_t derived_core_reason(const derived_core_t* c, uint32_t sig)
     return ((c == NULL) || (sig >= VEHICLE_CL250_DERIVED_COUNT)) ? DERIVED_NC_GEN : c->sched[sig].reason;
 }
 
+bool derived_core_ride_closed(const derived_core_t* c, uint16_t* counter)
+{
+    if ((c == NULL) || (counter == NULL) || !c->ride.have_prev) {
+        return false;
+    }
+    *counter = c->ride.prev_counter;
+    return true;
+}
+
 bool derived_core_ride_out(const derived_core_t* c, derived_ride_which_t which, uint32_t sig,
                            derived_out_t* out)
 {

@@ -1,6 +1,7 @@
 #include "features/derived/derived.h"
 
 #include "services/derived_inputs.h"
+#include "services/ride_records.h"
 #include "services/vehicle_signals.h"
 
 #include <stddef.h>
@@ -8,6 +9,20 @@
 static derived_core_t core;
 static derived_in_t inputs[VEHICLE_CL250_DID_COUNT];
 static derived_inputs_record_t latest; /* the newest record read */
+static uint32_t published_closed;      /* closed_count of the last ride-record publish */
+
+/* ride_records_value_fn over the last closed ride (D-098): VALID only; NOT_COMPUTED,
+ * NO_DATA and INVALID read as no value (NOT_AVAILABLE on the wire). */
+static bool closed_ride_value(uint32_t signal, float* value)
+{
+    derived_out_t o;
+    const bool ok = derived_core_ride_out(&core, DERIVED_RIDE_PREVIOUS, signal, &o) &&
+                    (o.status == DERIVED_VALID);
+    if (ok) {
+        *value = o.value;
+    }
+    return ok;
+}
 
 // cppcheck-suppress misra-c2012-8.7 ; DEV-002: called by the boot setup (host program, H7) and the tests
 void derived_init(void)
@@ -25,6 +40,7 @@ void derived_init(void)
     latest.published_ms = 0u;
     latest.epoch_counter = 0u;
     latest.epoch_open = 0u;
+    published_closed = 0u; /* the boot records (no ride) come from ride_records_init() */
 }
 
 // cppcheck-suppress misra-c2012-8.7 ; DEV-002: called by the derived task (host program, H7) and the tests
@@ -41,6 +57,15 @@ void derived_step(uint32_t now_ms)
     }
     const derived_epoch_t epoch = {true, latest.epoch_open != 0u, latest.epoch_counter};
     derived_core_step_epoch(&core, now_ms, inputs, &epoch);
+    /* D-098 item 6: the records go to the comms task only when a ride closed, encoded here
+     * (the derived task), so the comms pass only copies bytes. One publish per close; a
+     * publish that did nothing (no init, producer fault) is not retried. */
+    if (core.ride.closed_count != published_closed) {
+        published_closed = core.ride.closed_count;
+        uint16_t counter = 0u;
+        const bool closed = derived_core_ride_closed(&core, &counter);
+        (void)ride_records_publish(closed_ride_value, closed, counter); /* the one producer call site */
+    }
 }
 
 // cppcheck-suppress misra-c2012-8.7 ; DEV-002: called by the derived task (future logger) and the tests

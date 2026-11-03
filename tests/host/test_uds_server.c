@@ -20,10 +20,13 @@
 #include "services/can_sm.h"
 #include "services/diag.h"
 #include "services/lean_health.h"
+#include "services/ride_records.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
 #include "uds_iso14229.h"
+#include "vectors/derived_ride_records.h"
 #include "vehicle_cl250.h"
+#include "vehicle_cl250_derived.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -98,6 +101,7 @@ void setUp(void)
     diag_init(timebase_now_ms());
     vehicle_signals_init();
     lean_health_init();
+    ride_records_init();
     memset(&server, 0, sizeof server);
     TEST_ASSERT_EQUAL(ISOTP_OK, uds_server_open(&server));
     tester_init();
@@ -1392,6 +1396,56 @@ static void test_a_latched_client_still_writes_fresh_step_counters(void)
 
 #define LH(f) (3u + PLATFORM_UDS_LEAN_HEALTH_##f##_BYTE) /* field offset in got[] */
 
+/* D-098: 0xFD40-0xFD4E from the comms copy of services/ride_records. */
+static bool stop_count_9(uint32_t signal, float* value)
+{
+    *value = 9.0f;
+    return signal == VEHICLE_CL250_DERIVED_RIDE_STOP_COUNT;
+}
+
+static void test_ride_record_dids_answer_the_golden_no_ride_records_at_boot(void)
+{
+    const uint32_t n = (uint32_t)(sizeof derived_no_ride_records / sizeof derived_no_ride_records[0]);
+    for (uint32_t i = 0u; i < n; i++) {
+        const derived_ride_record_vector_t* const v = &derived_no_ride_records[i];
+        TEST_ASSERT_TRUE(read_did(v->did));
+        TEST_ASSERT_EQUAL_UINT16(3u + v->length, got_len);
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(v->bytes, &got[3], v->length);
+    }
+    /* 0xFD42 RIDE_OPERATING_POINTS (the DID after RIDE_FUELING) is not in gen/ (D-098 item 1:
+     * multi-element only, not served in v1): absent from the table and answered with 0x31.
+     * The loop below fails if a later defs release adds it, so this test is revisited then. */
+    const uint16_t operating_points = (uint16_t)(PLATFORM_UDS_DID_RIDE_FUELING + 1u);
+    for (uint32_t i = 0u; i < PLATFORM_UDS_DID_COUNT; i++) {
+        TEST_ASSERT_NOT_EQUAL(operating_points, platform_uds_dids[i].did);
+    }
+    const uint8_t req[] = {UDS_SID_READ_DATA_BY_IDENTIFIER, DID_BYTES(operating_points)};
+    TEST_ASSERT_TRUE(REQUEST(req));
+    TEST_ASSERT_EQUAL_HEX8(UDS_SID_NEGATIVE_RESPONSE, got[0]);
+    TEST_ASSERT_EQUAL_HEX8(UDS_NRC_REQUEST_OUT_OF_RANGE, got[2]);
+}
+
+static void test_ride_record_dids_serve_the_taken_record_in_one_multi_did_read(void)
+{
+    TEST_ASSERT_TRUE(ride_records_publish(stop_count_9, true, 0x0102u));
+    TEST_ASSERT_TRUE(read_did(PLATFORM_UDS_DID_RIDE_USAGE));
+    TEST_ASSERT_EQUAL_HEX8(0u, got[3u + PLATFORM_UDS_RIDE_USAGE_RIDE_CLOSED_BYTE]); /* not taken yet */
+    ride_records_take(); /* the comms pass */
+    const uint8_t req[] = {UDS_SID_READ_DATA_BY_IDENTIFIER, DID_BYTES(PLATFORM_UDS_DID_RIDE_ENGINE_STRESS),
+                           DID_BYTES(PLATFORM_UDS_DID_RIDE_ECU_HEALTH), DID_BYTES(PLATFORM_UDS_DID_RIDE_WINDOW_WARM_IDLE),
+                           DID_BYTES(PLATFORM_UDS_DID_RIDE_USAGE)};
+    TEST_ASSERT_TRUE(REQUEST(req));
+    TEST_ASSERT_EQUAL_HEX8(POS(UDS_SID_READ_DATA_BY_IDENTIFIER), got[0]);
+    TEST_ASSERT_EQUAL_UINT16(1u + 8u + PLATFORM_UDS_DID_RIDE_ENGINE_STRESS_LENGTH + PLATFORM_UDS_DID_RIDE_ECU_HEALTH_LENGTH +
+                                 PLATFORM_UDS_DID_RIDE_WINDOW_WARM_IDLE_LENGTH + PLATFORM_UDS_DID_RIDE_USAGE_LENGTH,
+                             got_len);
+    const uint8_t* const usage = &got[got_len - PLATFORM_UDS_DID_RIDE_USAGE_LENGTH];
+    TEST_ASSERT_EQUAL_HEX8(PLATFORM_UDS_RIDE_USAGE_RIDE_CLOSED_MASK, usage[PLATFORM_UDS_RIDE_USAGE_RIDE_CLOSED_BYTE]);
+    TEST_ASSERT_EQUAL_HEX8(0x01u, usage[PLATFORM_UDS_RIDE_USAGE_RIDE_COUNTER_BYTE]);
+    TEST_ASSERT_EQUAL_HEX8(0x02u, usage[PLATFORM_UDS_RIDE_USAGE_RIDE_COUNTER_BYTE + 1u]);
+    TEST_ASSERT_EQUAL_HEX8(9u, usage[PLATFORM_UDS_RIDE_USAGE_RIDE_STOP_COUNT_BYTE + 1u]);
+}
+
 static void test_lean_health_did_is_served_from_the_comms_task_copy_in_the_default_session(void)
 {
     /* no record since boot and no flag: not fresh, UNLEARNED_S unknown, nothing else */
@@ -1494,6 +1548,8 @@ int main(void)
     RUN_TEST(test_an_extended_format_frame_on_the_functional_id_is_not_routed_or_answered);
     RUN_TEST(test_platform_request_ids_never_latch_the_vehicle_client);
     RUN_TEST(test_vehicle_functional_watch_frames_latch_the_client_but_never_reach_the_server);
+    RUN_TEST(test_ride_record_dids_answer_the_golden_no_ride_records_at_boot);
+    RUN_TEST(test_ride_record_dids_serve_the_taken_record_in_one_multi_did_read);
     RUN_TEST(test_platform_session_and_clear_requests_leave_the_vehicle_client_unchanged);
     RUN_TEST(test_platform_session_and_clear_requests_never_release_a_latched_client);
     return UNITY_END();

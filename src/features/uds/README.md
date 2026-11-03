@@ -365,6 +365,10 @@ Any other NRC or a malformed answer only ends the run. conn's BOTH_IDS rule and 
   - bytes 1-2 `OFFSET_REJECTS` (imu `reject_count`), bytes 3-4 `UNLEARNED_S` (seconds of the current run without a learnt z offset, 0 while learnt); both saturate at 0xFFFF, never wrap
   - fail-safe: no record since boot or one older than the window reads `RECORD_FRESH` and `OFFSET_LEARNED` clear and `UNLEARNED_S` = UNKNOWN (0xFFFF); the other EKF fields keep their last values (0 before the first record). A latched output-snapshot producer fault stops the records, so it reads `RECORD_FRESH` clear for good while `EKF_ALIVE_OK` stays set (a stalled EKF clears it)
   - the server never calls `snapshot_read_index()` and keeps no slot index: a second read would take the new record away from 0x020 (E-17 (b) second-reader rule, now in `services/snapshot.h`)
+- 0xFD40–0xFD4E the ride-summary records (D-098, C3 part 2b; 14 records, 0xFD42 `RIDE_OPERATING_POINTS` has no gen/ entry and is not served): the **last closed ride**, from `services/ride_records`, the **comms task's copy** of the records the derived task encoded at the ride close (the server never reads that snapshot). Every byte comes from gen/ (`PLATFORM_UDS_IDX_RIDE_*`, `*_LENGTH`, the header `*_BYTE` / `*_MASK`, `platform_uds_ride_fields[]`); a length other than the gen/ one fails (NRC 0x22), never a guess:
+  - header (4 bytes): layout version, the closed ride's stop-epoch counter (big-endian; wraps, restarts when the tester re-opens: a change detector, not a ride ID), flags bit 0 `RIDE_CLOSED`, bits 1-7 zero
+  - fields: raw = round half to even of (value - range_min) / resolution in float32 (`lrintf`), unsigned big-endian; all ones = NOT_AVAILABLE (not computed on rt-core yet, invalid, or outside 0..raw_max: never clamped)
+  - before the first close since boot: counter 0, `RIDE_CLOSED` 0, every field NOT_AVAILABLE. No persistence (D-045 later)
 - 0xFD10–0xFD14 the five CL250 samples from `services/vehicle_signals`: [state 0 NONE / 1 VALID / 2 STALE][age ms, big-endian, saturates at 0xFFFF, 0xFFFF for NONE][raw, big-endian]
 
 **DTCs** (`services/diag`, RAM only until the H7 flash driver, D-040):

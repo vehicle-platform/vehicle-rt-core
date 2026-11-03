@@ -29,6 +29,7 @@ vehicle_host_test(test_uds_client vehicle_rtcore_fw vehicle_rtcore_sim vehicle_r
 vehicle_host_test(test_uds_server_core)
 vehicle_host_test(test_diag vehicle_rtcore_fw)
 vehicle_host_test(test_uds_server vehicle_rtcore_fw vehicle_rtcore_sim vehicle_rtcore_hal_host)
+target_include_directories(test_uds_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 vehicle_host_test(test_com_core)
 vehicle_host_test(test_com vehicle_rtcore_fw vehicle_rtcore_hal_host)
 vehicle_host_test(test_vehicle_republish_core)
@@ -113,3 +114,10 @@ add_test(NAME sil_vehicle_rtcore_host_dtc_run
 # (session, multi-frame reads, DTCs, functional requests, P2 check, S3 expiry; ~6 s).
 add_test(NAME sil_vehicle_rtcore_host_uds_server
          COMMAND vehicle_rtcore_host --uds-scenario --quiet)
+# D-098 ride-summary records: the pure writer against vehicle-server's golden records.
+vehicle_host_test(test_ride_records_core)
+target_include_directories(test_ride_records_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
+vehicle_host_test(test_ride_records vehicle_rtcore_fw vehicle_rtcore_hal_host)
+# The ride-record hand-over derived task -> comms task (D-098): two threads on the real service.
+vehicle_host_test(test_ride_records_stress vehicle_rtcore_fw vehicle_rtcore_hal_host Threads::Threads)
+set_tests_properties(test_ride_records_stress PROPERTIES TIMEOUT 60)
