@@ -28,7 +28,9 @@
  *   - the forwarded frames are exactly the expected ones, untorn, strictly increasing,
  *     none repeated, none absorbed (the M4->M7 side);
  *   - the M7 layout word is back (the test wipes it before one pass);
- * and at the end: the M4 saw every EKF_LEAN frame, untorn and in order, with no overrun or
+ * and at the end: the M4 saw every EKF_LEAN frame offered before a pass whose M4 layout
+ * word matched at its start, untorn and in order, and every frame offered before a pass
+ * with a differing word was dropped and counted, never written (E-28 (5)); no overrun or
  * deferral counted (the M7->M4 side); after the M4 died, every later take is refused
  * (read_busy accounts for them), nothing torn is forwarded, and the slot is stale in
  * mailbox_health() after its E2E timeout.
@@ -235,6 +237,10 @@ static uint32_t lean_seen_n;
 static uint32_t lean_torn;
 static uint32_t lean_not_increasing;
 static uint32_t lean_rejected;
+static uint32_t lean_expect[MAX_FRAMES]; /* EKF_LEAN frames the M7 must write, in order */
+static uint32_t lean_expect_n;
+static uint32_t lean_drop_expect;       /* EKF_LEAN frames the M7 must drop (M4 word differs) */
+static uint32_t lean_drops_total;       /* over all scenarios: the drop path really ran */
 
 /* The M7 side: offers and the forwards seen on the bus. */
 static uint32_t m7_offered;
@@ -274,6 +280,8 @@ static void rig_up(void)
     lean_torn = 0u;
     lean_not_increasing = 0u;
     lean_rejected = 0u;
+    lean_expect_n = 0u;
+    lean_drop_expect = 0u;
     m7_offered = 0u;
     expect_n = 0u;
     got_n = 0u;
@@ -530,13 +538,24 @@ static uint32_t scenario(action_t act, int32_t at, uint32_t offer_mask)
     for (uint32_t s = 0u; s < STEPS; s++) {
         now++;
         m4_turn();
-        if ((offer_mask & ((uint32_t)1u << s)) != 0u) {
+        const bool offered = (offer_mask & ((uint32_t)1u << s)) != 0u;
+        if (offered) {
             offer_lean();
         }
         if (s == WIPE_M7_STEP) {
             region.word[MAILBOX_M7_LAYOUT_WORD] = 0u; /* the M7 must restore it in this pass */
         }
         step_peer_ok = region.word[MAILBOX_M4_LAYOUT_WORD] == PLATFORM_MAILBOX_LAYOUT_ID;
+        if (offered) {
+            /* the M7 reads the M4 word before its first operation of the pass */
+            if (!step_peer_ok) {
+                lean_drop_expect++;
+            } else if (lean_expect_n < MAX_FRAMES) {
+                lean_expect[lean_expect_n++] = m7_offered;
+            } else {
+                /* not reached: at most MAX_FRAMES offers per scenario */
+            }
+        }
         mailbox_step(now);
         drain_bus();
 
@@ -565,7 +584,8 @@ static uint32_t scenario(action_t act, int32_t at, uint32_t offer_mask)
         CHECK_TRUE(injected || (inject_fn == NULL) || (at >= (int32_t)ops));
     }
 
-    /* M7 -> M4: every offered frame, untorn and in order; nothing counted as lost. */
+    /* M7 -> M4: every frame offered into a matching M4, untorn and in order; every frame
+     * offered while the M4 word differed dropped and counted; no overrun or deferral. */
     const mailbox_health_t h = mailbox_health(now);
     CHECK_EQ(0u, lean_torn);
     CHECK_EQ(0u, lean_not_increasing);
@@ -574,14 +594,16 @@ static uint32_t scenario(action_t act, int32_t at, uint32_t offer_mask)
     CHECK_EQ(0u, h.write_deferred);
     CHECK_EQ(0u, h.forward_overruns + h.forward_dropped);
     CHECK_TRUE(!h.layout_mismatch);
-    for (uint32_t i = 0u; i < lean_seen_n; i++) {
-        CHECK_EQ(i + 1u, lean_seen[i]); /* consecutive: no frame skipped */
+    CHECK_EQ(lean_drop_expect, h.write_dropped);
+    lean_drops_total += h.write_dropped;
+    for (uint32_t i = 0u; (i < lean_seen_n) && (i < lean_expect_n); i++) {
+        CHECK_EQ(lean_expect[i], lean_seen[i]); /* in order, no dropped frame written late */
     }
     if (m4_dead) {
-        CHECK_TRUE(lean_seen_n <= m7_offered);
+        CHECK_TRUE(lean_seen_n <= lean_expect_n);
     } else {
-        CHECK_EQ(m7_offered, lean_seen_n);
-        CHECK_EQ(m7_offered, h.write_done);
+        CHECK_EQ(lean_expect_n, lean_seen_n);
+        CHECK_EQ(lean_expect_n, h.write_done);
     }
 
     /* The M7 accounts for every refused take; a dead M4 leaves its semaphore held. */
@@ -620,8 +642,10 @@ static void test_every_m4_action_after_every_m7_operation_keeps_the_mailbox_whol
             }
         }
     }
-    printf("mailbox interleave: %u scenarios\n", (unsigned)runs);
+    printf("mailbox interleave: %u scenarios, %u EKF_LEAN frames dropped on a mismatch\n", (unsigned)runs,
+           (unsigned)lean_drops_total);
     TEST_ASSERT_GREATER_THAN_UINT32(100u, runs);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, lean_drops_total); /* the wiped-word actions reach the drop path */
 }
 
 static void test_a_frame_read_while_the_m4_layout_is_wiped_is_never_forwarded(void)
