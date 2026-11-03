@@ -68,6 +68,15 @@ _Static_assert(PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_INDEX == 3u, "slot order");
 _Static_assert(PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_INDEX == 4u, "slot order");
 _Static_assert(PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_INDEX == 5u, "slot order");
 _Static_assert(PLATFORM_MAILBOX_SLOT_COUNT <= 32u, "stale_slots is a 32-bit mask");
+/* A dropped or replaced M7->M4 frame must never read as valid on the M4 (OK_SOME_LOST):
+ * the bounded-loss rules of D-093 amendments 1 and 2 need E2E max delta 1 on every slot
+ * message (safety-reviewer MINOR-1, 2026-11-04). */
+_Static_assert(PLATFORM_EKF_LEAN_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+_Static_assert(PLATFORM_EKF_FRICTION_MASS_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+_Static_assert(PLATFORM_HEARTBEAT_RT_CORE_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+_Static_assert(PLATFORM_SAFETY_REQUEST_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+_Static_assert(PLATFORM_SAFETY_WARNING_STATUS_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+_Static_assert(PLATFORM_HEARTBEAT_SAFETY_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
 /* Mailbox HSEM IDs stay in 1..31 (ID 0 is vendor boot code's, D-093 item 5). */
 _Static_assert((PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID >= HAL_HSEM_ID_MIN) &&
                    (PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID <= HAL_HSEM_ID_MAX), "HSEM ID range");
@@ -167,10 +176,21 @@ bool mailbox_offer(uint32_t frame_id, bool extended, const uint8_t* data, uint8_
     return false;
 }
 
-/* M7->M4: the pending frame under the slot's HSEM, or deferred to the next pass. */
-static void write_slot(uint32_t i)
+/* M7->M4: the pending frame under the slot's HSEM, or deferred to the next pass. While
+ * the M4 layout word differs, no slot of that peer is written (an image built from other
+ * defs may place its slots differently) and the pending frame is dropped, never kept: a
+ * frame held through a mismatch shorter than its E2E timeout would reach the M4 late with
+ * a counter step of 1 and read as OK with a stale payload (D-093 amendment 2, ISSUES E-28
+ * (5), user 2026-11-04). The drop relies on max delta 1 (asserted above): the M4 then
+ * reads the gap as WRONG_SEQUENCE, or INITIAL after its timeout, never as valid. A one-pass
+ * wipe of a matching M4's word also drops that pass's frames (fails towards UNAVAILABLE). */
+static void write_slot(uint32_t i, bool peer_ok)
 {
     if (!mb_pending[i].pending) {
+        return;
+    }
+    if (!peer_ok) {
+        mailbox_pending_drop(&mb_pending[i]);
         return;
     }
     hal_hsem_key_t key;
@@ -249,7 +269,7 @@ void mailbox_step(uint32_t now_ms)
     }
     for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
         if (m7_writes(i)) {
-            write_slot(i);
+            write_slot(i, peer_ok);
         } else if (m7_reads(i)) {
             read_slot(i, peer_ok, now_ms);
             forward_slot(i);
@@ -276,6 +296,7 @@ mailbox_health_t mailbox_health(uint32_t now_ms)
             h.write_done = mb_sat_add(h.write_done, p->done);
             h.write_deferred = mb_sat_add(h.write_deferred, p->deferred);
             h.write_overruns = mb_sat_add(h.write_overruns, p->overruns);
+            h.write_dropped = mb_sat_add(h.write_dropped, p->dropped);
         } else if (m7_reads(i)) {
             const mailbox_reader_t* const r = &mb_reader[i];
             if (mailbox_reader_stale(r, now_ms, slot_defs[i].timeout_ms)) {

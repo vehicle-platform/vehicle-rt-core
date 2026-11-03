@@ -13,7 +13,9 @@
  *   mailbox_step()    app/comms.c only, once per comms pass after 0x081/0x020: rewrites the
  *                     M7 layout word, writes each pending M7->M4 frame under its HSEM or
  *                     defers it to the next pass (no wait, no retry loop), reads each
- *                     M4->M7 slot under its HSEM and forwards a new frame.
+ *                     M4->M7 slot under its HSEM and forwards a new frame. While the M4
+ *                     layout word differs it writes no M7->M4 slot and drops the pending
+ *                     frames (counted, never held for later; E-28 (5), user 2026-11-04).
  *
  * Both run in the comms task: one accessing context per slot on the M7 (D-093 item 5),
  * so the slot state here needs no lock. CI greps the two call sites.
@@ -51,6 +53,9 @@ typedef struct {
     uint32_t write_done;       /* M7->M4 frames committed */
     uint32_t write_deferred;   /* passes a pending M7->M4 frame waited for its HSEM */
     uint32_t write_overruns;   /* M7->M4 frames replaced before they were written */
+    uint32_t write_dropped;    /* M7->M4 frames dropped while the M4 layout word differed; also
+                                * > 0 after a normal boot with the M7 first, so a DTC uses
+                                * layout_mismatch (with its grace), never this alone */
     uint32_t read_busy;        /* M4->M7 reads with the HSEM not taken */
     uint32_t read_rejected;    /* M4->M7 frames dropped: layout mismatch or bad len */
     uint32_t forward_done;     /* M4->M7 frames the platform port accepted */

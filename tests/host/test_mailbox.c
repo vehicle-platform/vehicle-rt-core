@@ -310,6 +310,102 @@ static void test_a_frame_replaced_while_pending_is_a_counted_overrun(void)
     TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
 }
 
+/* E-28 (5): nothing goes into an M4 region with another layout, and a frame offered
+ * during the mismatch is dropped, never written late once the word matches. */
+static void test_a_mismatched_m4_layout_gets_no_write_and_the_frame_is_dropped(void)
+{
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    TEST_ASSERT_EQUAL(MAILBOX_READ_BASELINE, m4_read_lean(out));
+    const uint32_t seq_before = region.layout.slot[LEAN_IDX].write_seq;
+    uint32_t slot_before[MAILBOX_SLOT_WORDS];
+    for (uint32_t j = 0u; j < MAILBOX_SLOT_WORDS; j++) {
+        slot_before[j] = region.word[LEAN_WORD + j];
+    }
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID ^ 1u); /* an M4 image built from other defs */
+    offer_lean(1u);
+    step();
+    for (uint32_t j = 0u; j < MAILBOX_SLOT_WORDS; j++) {
+        TEST_ASSERT_EQUAL_HEX32(slot_before[j], region.word[LEAN_WORD + j]);
+    }
+    TEST_ASSERT_EQUAL_UINT32(seq_before, region.layout.slot[LEAN_IDX].write_seq);
+    TEST_ASSERT_EQUAL(HSEM_HOST_FREE, hsem_host_owner(LEAN_HSEM)); /* not even taken */
+    mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_dropped);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_deferred);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_done);
+    /* the word matches again: the dropped frame is never written, the next one is */
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    step();
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+    offer_lean(2u);
+    step();
+    uint8_t want[MAILBOX_PAYLOAD_BYTES];
+    frame(2u, LEAN_LEN, want);
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, out, MAILBOX_PAYLOAD_BYTES);
+    h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_dropped);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_overruns);
+}
+
+/* A frame deferred by a refused HSEM and then caught by a mismatch is dropped, never
+ * written after the match (safety-reviewer 2026-11-04, test 1). */
+static void test_a_deferred_frame_caught_by_a_mismatch_is_dropped(void)
+{
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    const uint32_t seq_before = region.layout.slot[LEAN_IDX].write_seq;
+    offer_lean(1u);
+    hsem_host_seize(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    step(); /* deferred */
+    hsem_host_release_as(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID ^ 1u);
+    step(); /* dropped */
+    TEST_ASSERT_EQUAL(HSEM_HOST_FREE, hsem_host_owner(LEAN_HSEM));
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    step();
+    step();
+    TEST_ASSERT_EQUAL_UINT32(seq_before, region.layout.slot[LEAN_IDX].write_seq);
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_deferred);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_dropped);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_done);
+}
+
+/* Each frame offered into a mismatch is one drop (not an overrun), on every M7->M4 slot:
+ * here the rt-core heartbeat, the costlier loss on the M4 (safety-reviewer tests 2-3). */
+static void test_heartbeat_frames_offered_into_a_mismatch_are_each_dropped(void)
+{
+    boot_with_m4();
+    const uint32_t hb_idx = PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_INDEX;
+    const uint8_t hb_len = (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_LENGTH;
+    const uint32_t seq_before = region.layout.slot[hb_idx].write_seq;
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID ^ 1u);
+    uint8_t d[MAILBOX_PAYLOAD_BYTES];
+    for (uint8_t k = 1u; k <= 2u; k++) {
+        frame(k, hb_len, d);
+        TEST_ASSERT_TRUE(mailbox_offer(PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_FRAME_ID, false, d, hb_len));
+        step();
+    }
+    TEST_ASSERT_EQUAL_UINT32(seq_before, region.layout.slot[hb_idx].write_seq);
+    mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(2u, h.write_dropped);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_overruns);
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    frame(3u, hb_len, d);
+    TEST_ASSERT_TRUE(mailbox_offer(PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_FRAME_ID, false, d, hb_len));
+    step();
+    TEST_ASSERT_EQUAL_UINT32(seq_before + 1u, region.layout.slot[hb_idx].write_seq);
+    TEST_ASSERT_EQUAL_UINT8(d[0], (uint8_t)(region.layout.slot[hb_idx].data[0]));
+    h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(2u, h.write_dropped);
+}
+
 static void test_a_wiped_m7_layout_word_recovers_in_one_pass(void)
 {
     boot();
@@ -507,6 +603,9 @@ int main(void)
     RUN_TEST(test_a_pending_frame_is_written_in_the_same_pass_and_read_by_the_m4);
     RUN_TEST(test_a_refused_hsem_defers_to_the_next_pass);
     RUN_TEST(test_a_frame_replaced_while_pending_is_a_counted_overrun);
+    RUN_TEST(test_a_mismatched_m4_layout_gets_no_write_and_the_frame_is_dropped);
+    RUN_TEST(test_a_deferred_frame_caught_by_a_mismatch_is_dropped);
+    RUN_TEST(test_heartbeat_frames_offered_into_a_mismatch_are_each_dropped);
     RUN_TEST(test_a_wiped_m7_layout_word_recovers_in_one_pass);
     RUN_TEST(test_a_new_m4_frame_is_forwarded_verbatim_once);
     RUN_TEST(test_a_busy_m4_slot_is_read_in_the_next_pass);

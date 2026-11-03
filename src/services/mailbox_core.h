@@ -62,7 +62,7 @@ typedef struct {
     uint32_t done;     /* frames written / forwarded (saturating) */
     uint32_t deferred; /* passes the frame had to wait (HSEM or TX busy) */
     uint32_t overruns; /* a pending frame replaced by a newer one: lost (D-093 item 5 as narrowed) */
-    uint32_t dropped;  /* frames given up (the forward's bus-off or latched port) */
+    uint32_t dropped;  /* frames given up (the forward's bus-off or latched port, the writer's peer mismatch) */
 } mailbox_pending_t;
 
 /* A slot's raw content as read under its HSEM. */
