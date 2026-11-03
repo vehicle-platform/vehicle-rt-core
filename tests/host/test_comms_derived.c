@@ -9,6 +9,11 @@
  * The test defines hal_atomic_u32_* itself (a double that can corrupt the derived word),
  * so the host port's object is not linked; A must run before B because the module stays
  * initialised once derived_inputs_init() ran.
+ *
+ * D-098 (architecture-guard MINOR on the plan): the ride-record take in the same pass,
+ * services/ride_records never initialised (every publish counted, take does nothing) and
+ * initialised with a "ride close" published every 50 ms (a take and a 205 B copy in the
+ * next pass): 0x081 and 0x020 again identical.
  */
 #include "app/comms.h"
 #include "app/host/sim_ecu.h"
@@ -21,6 +26,7 @@
 #include "platform.h"
 #include "services/can_if.h"
 #include "services/derived_inputs.h"
+#include "services/ride_records.h"
 #include "services/diag.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
@@ -36,6 +42,7 @@
 static const hal_atomic_u32_t* derived_word;
 static bool capture;
 static bool corrupt_exchange;
+static uint32_t ride_publish_every_ms; /* 0: no ride-record publish in the run */
 
 uint32_t hal_atomic_u32_load(const hal_atomic_u32_t* a)
 {
@@ -151,6 +158,9 @@ static counts_t run(uint32_t corrupt_at_ms)
             lean_ekf_step(&lean, now);
         }
         sim_ecu_step(&ecu, now);
+        if ((ride_publish_every_ms != 0u) && ((i % ride_publish_every_ms) == 0u)) {
+            (void)ride_records_publish(NULL, false, 0u); /* the derived task closing a ride */
+        }
         comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
         can_frame_t got;
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
@@ -201,9 +211,35 @@ static void test_0x081_and_0x020_keep_their_cycle_whatever_derived_inputs_does(v
     TEST_ASSERT_EQUAL_UINT32(a.lean_gap_max, c.lean_gap_max);
 }
 
+static void test_0x081_and_0x020_keep_their_cycle_whatever_ride_records_does(void)
+{
+    ride_publish_every_ms = 50u;
+    /* A: ride_records_init() never ran */
+    rig_up();
+    const counts_t a = run(0u);
+    TEST_ASSERT_EQUAL_UINT32(RUN_MS / 50u, ride_records_skipped_count());
+    TEST_ASSERT_TRUE(a.hb_frames > 10u);
+    TEST_ASSERT_TRUE(a.lean_frames > 40u);
+
+    /* B: initialised, a close every 50 ms taken by the comms pass */
+    rig_up();
+    ride_records_init();
+    const counts_t b = run(0u);
+    TEST_ASSERT_EQUAL_UINT32(0u, ride_records_skipped_count());
+    TEST_ASSERT_FALSE(ride_records_producer_fault());
+    TEST_ASSERT_FALSE(ride_records_consumer_fault());
+    ride_publish_every_ms = 0u;
+
+    TEST_ASSERT_EQUAL_UINT32(a.hb_frames, b.hb_frames);
+    TEST_ASSERT_EQUAL_UINT32(a.lean_frames, b.lean_frames);
+    TEST_ASSERT_EQUAL_UINT32(a.hb_gap_max, b.hb_gap_max);
+    TEST_ASSERT_EQUAL_UINT32(a.lean_gap_max, b.lean_gap_max);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_0x081_and_0x020_keep_their_cycle_whatever_derived_inputs_does);
+    RUN_TEST(test_0x081_and_0x020_keep_their_cycle_whatever_ride_records_does);
     return UNITY_END();
 }

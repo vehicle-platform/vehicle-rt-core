@@ -186,6 +186,10 @@ void derived_core_step_epoch(derived_core_t* c, uint32_t now_ms, const derived_i
 bool derived_core_ride_out(const derived_core_t* c, derived_ride_which_t which, uint32_t sig,
                            derived_out_t* out);
 
+/* The last closed ride (D-098 item 4): true with its stop-epoch counter in *counter once a
+ * ride has closed since boot; false before (or for a NULL argument). */
+bool derived_core_ride_closed(const derived_core_t* c, uint16_t* counter);
+
 /* The last output of signal `sig` (a VEHICLE_CL250_DERIVED_*), or NULL when out of range. */
 const derived_out_t* derived_core_out(const derived_core_t* c, uint32_t sig);
 

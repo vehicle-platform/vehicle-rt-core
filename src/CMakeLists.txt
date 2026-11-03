@@ -13,6 +13,7 @@ add_library(vehicle_rtcore_logic STATIC
     services/alive_core.c
     services/imu_core.c
     services/lean_health_core.c
+    services/ride_records_core.c
     features/cornering/lean_core.c
     features/cornering/lean_tx_core.c
     features/derived/derived_core.c
@@ -59,6 +60,7 @@ add_library(vehicle_rtcore_fw STATIC
     services/imu.c
     services/lean_health.c
     services/derived_inputs.c
+    services/ride_records.c
     services/tester_epoch.c
     features/uds/isotp_link.c
     features/uds/uds_client.c

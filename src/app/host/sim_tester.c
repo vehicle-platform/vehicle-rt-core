@@ -21,7 +21,7 @@
 #define MAX_REQ 12u
 #define MAX_EXPECT 16u
 
-typedef enum { CHECK_NONE = 0, CHECK_MULTI_READ, CHECK_HEALTH } check_t;
+typedef enum { CHECK_NONE = 0, CHECK_MULTI_READ, CHECK_HEALTH, CHECK_NO_RIDE } check_t;
 
 typedef struct {
     const char* name;
@@ -67,6 +67,12 @@ static const step_t script[] = {
      {POS(UDS_SID_READ_DATA_BY_IDENTIFIER), HI(PLATFORM_UDS_DID_RT_CORE_HEALTH),
       LO(PLATFORM_UDS_DID_RT_CORE_HEALTH)}, 3u,
      (uint16_t)(3u + PLATFORM_UDS_DID_RT_CORE_HEALTH_LENGTH), CHECK_HEALTH},
+    {"ride usage (0xFD40, no ride closed)", 0u, false,
+     {UDS_SID_READ_DATA_BY_IDENTIFIER, HI(PLATFORM_UDS_DID_RIDE_USAGE),
+      LO(PLATFORM_UDS_DID_RIDE_USAGE)}, 3u, false,
+     {POS(UDS_SID_READ_DATA_BY_IDENTIFIER), HI(PLATFORM_UDS_DID_RIDE_USAGE),
+      LO(PLATFORM_UDS_DID_RIDE_USAGE)}, 3u,
+     (uint16_t)(3u + PLATFORM_UDS_DID_RIDE_USAGE_LENGTH), CHECK_NO_RIDE},
     {"DTC count (none failing)", 0u, false,
      {UDS_SID_READ_DTC_INFORMATION, UDS_READ_DTC_REPORT_NUMBER_OF_DTC_BY_STATUS_MASK,
       PLATFORM_UDS_DTC_STATUS_AVAILABILITY_MASK}, 3u,
@@ -208,6 +214,24 @@ static bool check_health(sim_tester_t* t, const uint8_t* rsp)
     return true;
 }
 
+/* 0xFD40 on the bench (D-098): the ECU never goes absent in the script, so no ride closes:
+ * layout version, counter 0, RIDE_CLOSED 0. */
+static bool check_no_ride(sim_tester_t* t, const uint8_t* rsp)
+{
+    const uint8_t* rec = &rsp[3];
+    if (rec[PLATFORM_UDS_RIDE_USAGE_LAYOUT_VERSION_BYTE] != PLATFORM_UDS_RIDE_RECORD_LAYOUT_VERSION) {
+        fail(t, "0xFD40 layout version differs from gen/");
+        return false;
+    }
+    if (((rec[PLATFORM_UDS_RIDE_USAGE_RIDE_CLOSED_BYTE] & PLATFORM_UDS_RIDE_USAGE_RIDE_CLOSED_MASK) != 0u) ||
+        (rec[PLATFORM_UDS_RIDE_USAGE_RIDE_COUNTER_BYTE] != 0u) ||
+        (rec[PLATFORM_UDS_RIDE_USAGE_RIDE_COUNTER_BYTE + 1u] != 0u)) {
+        fail(t, "0xFD40 reports a closed ride on a bench where none closed");
+        return false;
+    }
+    return true;
+}
+
 static void on_answer(sim_tester_t* t, uint32_t now, const uint8_t* rsp, uint16_t len)
 {
     const step_t* s = &script[t->step];
@@ -234,6 +258,9 @@ static void on_answer(sim_tester_t* t, uint32_t now, const uint8_t* rsp, uint16_
         return;
     }
     if ((s->check == CHECK_HEALTH) && !check_health(t, rsp)) {
+        return;
+    }
+    if ((s->check == CHECK_NO_RIDE) && !check_no_ride(t, rsp)) {
         return;
     }
     next_step(t, now);

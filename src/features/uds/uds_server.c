@@ -5,6 +5,7 @@
 #include "services/can_sm.h"
 #include "services/diag.h"
 #include "services/lean_health.h"
+#include "services/ride_records.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
 #include "uds_iso14229.h"
@@ -266,6 +267,24 @@ static uds_server_data_t provider_read_did(const void* ctx, uint32_t idx, uint8_
     case PLATFORM_UDS_IDX_LEAN_HEALTH:
         /* refuses a length that differs from gen/ rather than guess */
         st = lean_health_read(now, out, len) ? UDS_SERVER_DATA_OK : UDS_SERVER_DATA_FAIL;
+        break;
+    case PLATFORM_UDS_IDX_RIDE_USAGE:
+    case PLATFORM_UDS_IDX_RIDE_FUELING:
+    case PLATFORM_UDS_IDX_RIDE_THERMAL:
+    case PLATFORM_UDS_IDX_RIDE_ELECTRICAL:
+    case PLATFORM_UDS_IDX_RIDE_ENGINE_STRESS:
+    case PLATFORM_UDS_IDX_RIDE_DRIVETRAIN:
+    case PLATFORM_UDS_IDX_RIDE_CALIBRATION:
+    case PLATFORM_UDS_IDX_RIDE_RIDER_STYLE:
+    case PLATFORM_UDS_IDX_RIDE_ECU_HEALTH:
+    case PLATFORM_UDS_IDX_RIDE_WINDOW_KEY_ON:
+    case PLATFORM_UDS_IDX_RIDE_WINDOW_CRANK:
+    case PLATFORM_UDS_IDX_RIDE_WINDOW_WARM_IDLE:
+    case PLATFORM_UDS_IDX_RIDE_WINDOW_CRUISE:
+    case PLATFORM_UDS_IDX_RIDE_WINDOW_POST_STOP:
+        /* D-098: the last closed ride from the comms copy (services/ride_records); the
+         * server never reads the snapshot. A length other than gen/ fails, never a guess. */
+        st = ride_records_read(idx, out, len) ? UDS_SERVER_DATA_OK : UDS_SERVER_DATA_FAIL;
         break;
     case PLATFORM_UDS_IDX_UPTIME:
         put_be(out, len, timebase_elapsed_ms(now, server->open_ms) / MS_PER_S);

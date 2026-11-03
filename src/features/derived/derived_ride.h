@@ -74,6 +74,7 @@ typedef struct {
     uint32_t last_now_ms; /* time of the last core step (stamps CURRENT reads) */
     uint32_t closed_count;
     uint16_t counter; /* epoch counter of the open ride */
+    uint16_t prev_counter; /* epoch counter of the last closed ride (valid once have_prev) */
     bool open;
     bool have_prev;
 } derived_ride_t;
@@ -97,7 +98,8 @@ void derived_ride_class_a(derived_ride_acc_t* a, uint32_t sig, float value);
  * stamp and seq are the caller's. Not a computed class-B slot: NOT_COMPUTED. */
 void derived_ride_finalize(const derived_ride_acc_t* a, uint32_t sig, derived_out_t* out);
 
-/* Closes the open ride into `prev` at now_ms. */
+/* Closes the open ride into `prev` at now_ms and keeps its epoch counter (the D-098
+ * header counter of the closed ride, not the counter of a ride opened later). */
 void derived_ride_close(derived_ride_t* r, uint32_t now_ms);
 
 #ifdef __cplusplus

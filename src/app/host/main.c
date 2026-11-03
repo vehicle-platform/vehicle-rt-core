@@ -46,6 +46,7 @@
 #include "services/can_if.h"
 #include "services/can_sm.h"
 #include "services/derived_inputs.h"
+#include "services/ride_records.h"
 #include "services/diag.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
@@ -300,6 +301,7 @@ int main(int argc, char** argv)
     }
     /* Derived-signal task (D-070): the DID hand-over first, then the task's state. */
     derived_inputs_init();
+    ride_records_init(); /* D-098: the no-ride records before either task runs */
     derived_init();
     if (!comms_apply_filters()) {
         fprintf(stderr, "CAN acceptance filter setup failed\n");

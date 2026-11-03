@@ -14,6 +14,7 @@
  *    reused) and of the accumulators.
  */
 #include "features/derived/derived_core.h"
+#include "services/ride_records_core.h"
 #include "vectors/derived_accel_gears.h"
 #include "vectors/derived_accel_gears_b.h"
 #include "vectors/derived_edge_values.h"
@@ -22,6 +23,7 @@
 #include "vectors/derived_idle_warmup_b.h"
 #include "vectors/derived_stale_gap.h"
 #include "vectors/derived_stale_gap_b.h"
+#include "vectors/derived_ride_records.h"
 #include "vectors/derived_two_rides_b.h"
 
 #include <math.h>
@@ -42,10 +44,13 @@ typedef struct {
     uint32_t n_out;
     const derived_vector_tol_t* tol;
     uint32_t n_tol;
+    const derived_ride_record_expected_t* rec; /* D-098 golden records per ride */
+    uint32_t n_rec;
 } bscenario_t;
 
 #define BSCENARIO(n, N, IN, NIN) \
-    { #n, IN, NIN, n##_rides, N##_RIDE_COUNT, n##_b_outputs, N##_B_OUTPUT_COUNT, n##_b_tol, N##_B_TOL_COUNT }
+    { #n, IN, NIN, n##_rides, N##_RIDE_COUNT, n##_b_outputs, N##_B_OUTPUT_COUNT, n##_b_tol, N##_B_TOL_COUNT, \
+      n##_ride_records, N##_RIDE_RECORD_COUNT }
 
 static const bscenario_t scenarios[] = {
     BSCENARIO(derived_idle_warmup, DERIVED_IDLE_WARMUP, derived_idle_warmup_inputs, DERIVED_IDLE_WARMUP_INPUT_COUNT),
@@ -164,6 +169,87 @@ static void compare_ride(const bscenario_t* sc, uint16_t ride)
     }
 }
 
+/* ---- D-098 records end to end ------------------------------------------------------------ */
+
+/* ride_records_value_fn over this test's core: the last closed ride, VALID only. */
+static bool core_value(uint32_t signal, float* value)
+{
+    derived_out_t o;
+    const bool ok = derived_core_ride_out(&core, DERIVED_RIDE_PREVIOUS, signal, &o) &&
+                    (o.status == DERIVED_VALID);
+    if (ok) {
+        *value = o.value;
+    }
+    return ok;
+}
+
+static uint32_t did_index(uint16_t did)
+{
+    for (uint32_t i = 0u; i < PLATFORM_UDS_DID_COUNT; i++) {
+        if (platform_uds_dids[i].did == did) {
+            return i;
+        }
+    }
+    return PLATFORM_UDS_DID_COUNT;
+}
+
+static uint32_t be_get(const uint8_t* p, uint32_t n)
+{
+    uint32_t v = 0u;
+    for (uint32_t i = 0u; i < n; i++) {
+        v = (v << 8u) | p[i];
+    }
+    return v;
+}
+
+static uint32_t n_rec_fields;
+static uint32_t n_rec_off_by_one;
+
+/* The records rt-core encodes from its own float32 closed values against the golden ones of
+ * `ride`: header byte-exact, a field NOT_AVAILABLE exactly where the golden one is, and
+ * otherwise at most one raw step apart (value tolerance resolution / 2, README). */
+static void compare_records(const bscenario_t* sc, uint16_t ride)
+{
+    uint16_t counter = 0u;
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &counter));
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(ride + 1u), counter);
+    uint8_t buf[RIDE_RECORDS_BYTES];
+    ride_records_encode(core_value, true, counter, buf);
+    uint32_t seen = 0u;
+    for (uint32_t r = 0u; r < sc->n_rec; r++) {
+        const derived_ride_record_expected_t* const e = &sc->rec[r];
+        if (e->ride != ride) {
+            continue;
+        }
+        seen++;
+        const uint32_t idx = did_index(e->did);
+        uint8_t got[DERIVED_RIDE_RECORD_MAX_LENGTH];
+        TEST_ASSERT_TRUE(ride_records_copy(buf, idx, got, e->length));
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(e->bytes, got, 4u); /* the D-098 header */
+        for (uint32_t i = 0u; i < PLATFORM_UDS_RIDE_FIELD_COUNT; i++) {
+            const platform_uds_ride_field_t* const f = &platform_uds_ride_fields[i];
+            if (f->did_idx != idx) {
+                continue;
+            }
+            const uint32_t want = be_get(&e->bytes[f->byte], f->length);
+            const uint32_t have = be_get(&got[f->byte], f->length);
+            n_rec_fields++;
+            if ((want == f->na) || (have == f->na)) {
+                if (want != have) {
+                    fprintf(stderr, "%s ride %u field %u: expected raw %u, got %u (NOT_AVAILABLE differs)\n",
+                            sc->name, (unsigned)ride, (unsigned)i, (unsigned)want, (unsigned)have);
+                }
+                TEST_ASSERT_EQUAL_UINT32(want, have);
+            } else {
+                const uint32_t d = (want > have) ? (want - have) : (have - want);
+                TEST_ASSERT_TRUE_MESSAGE(d <= 1u, "a field differs by more than one raw step");
+                n_rec_off_by_one += (d == 1u) ? 1u : 0u;
+            }
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(DERIVED_RIDE_RECORD_COUNT, seen);
+}
+
 static void replay(const bscenario_t* sc)
 {
     rig();
@@ -186,6 +272,12 @@ static void replay(const bscenario_t* sc)
         for (uint32_t k = 0u; k < sc->n_rides; k++) {
             if (t == sc->rides[k].end_ms) {
                 compare_ride(sc, sc->rides[k].ride);
+                compare_records(sc, sc->rides[k].ride);
+            }
+            /* D-098 two rides: while ride k is open the records still carry ride k - 1 */
+            if ((k > 0u) && (t == ((sc->rides[k].start_ms + sc->rides[k].end_ms) / 2u))) {
+                TEST_ASSERT_TRUE(core.ride.open);
+                compare_records(sc, sc->rides[k - 1u].ride);
             }
         }
     }
@@ -198,11 +290,16 @@ static void test_golden_rides_match_the_reference(void)
     touch_unused_class_a_vectors();
     n_mismatch = 0u;
     n_rows = 0u;
+    n_rec_fields = 0u;
+    n_rec_off_by_one = 0u;
     for (uint32_t i = 0u; i < N_SCENARIOS; i++) {
         replay(&scenarios[i]);
     }
     printf("class-B golden replay: %u closed values compared, %u mismatches\n", (unsigned)n_rows,
            (unsigned)n_mismatch);
+    printf("D-098 records end to end: %u fields compared, %u one raw step apart\n",
+           (unsigned)n_rec_fields, (unsigned)n_rec_off_by_one);
+    TEST_ASSERT_TRUE(n_rec_fields > 0u);
     TEST_ASSERT_EQUAL_UINT32(0u, n_mismatch);
     TEST_ASSERT_TRUE(n_rows > 40u);
 }
@@ -390,6 +487,66 @@ static void test_two_rides_in_a_row_keep_only_the_last_closed_one(void)
     TEST_ASSERT_EQUAL_UINT32(2u, prev(START_COOLANT).seq);
 }
 
+/* D-098 item 4: the header counter is the CLOSED ride's epoch counter, kept at the close. */
+static void test_the_closed_ride_keeps_its_own_counter(void)
+{
+    rig();
+    uint16_t c = 0xBEEFu;
+    TEST_ASSERT_FALSE(derived_core_ride_closed(&core, &c)); /* nothing closed since boot */
+    TEST_ASSERT_EQUAL_UINT16(0xBEEFu, c);
+    TEST_ASSERT_FALSE(derived_core_ride_closed(NULL, &c));
+    TEST_ASSERT_FALSE(derived_core_ride_closed(&core, NULL));
+    epoch(true, 41u);
+    coolant(60.0f, 10u);
+    TEST_ASSERT_FALSE(derived_core_ride_closed(&core, &c)); /* open, not closed */
+    epoch(true, 42u); /* close + reopen in one record */
+    coolant(61.0f, 100u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(41u, c); /* not the open ride's 42 */
+    epoch(false, 42u);
+    step(200u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(42u, c);
+}
+
+static void test_the_closed_counter_wraps(void)
+{
+    rig();
+    uint16_t c = 0u;
+    epoch(true, 65535u);
+    coolant(60.0f, 10u);
+    epoch(true, 0u); /* 65535 -> 0 */
+    coolant(61.0f, 100u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(65535u, c);
+    epoch(false, 0u);
+    step(200u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(0u, c);
+}
+
+/* The tester re-opens (services/tester_epoch): {closed, 0}, then counter 1 again. */
+static void test_the_closed_counter_restarts_when_the_tester_reopens(void)
+{
+    rig();
+    uint16_t c = 0u;
+    epoch(true, 5u);
+    coolant(60.0f, 10u);
+    epoch(false, 0u); /* the re-open publishes {closed, 0} */
+    step(100u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(5u, c);
+    epoch(true, 1u);
+    coolant(70.0f, 200u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(5u, c); /* still the closed ride's while ride 1 is open */
+    epoch(false, 1u);
+    step(300u);
+    TEST_ASSERT_TRUE(derived_core_ride_closed(&core, &c));
+    TEST_ASSERT_EQUAL_UINT16(1u, c);
+    TEST_ASSERT_EQUAL_UINT32(2u, core.ride.closed_count);
+}
+
 static void test_the_part_1_step_has_no_ride(void)
 {
     rig();
@@ -503,5 +660,8 @@ int main(void)
     RUN_TEST(test_trim_mean_and_population_std);
     RUN_TEST(test_a_summary_outside_its_range_is_invalid_not_clamped);
     RUN_TEST(test_a_non_finite_sample_is_a_math_error);
+    RUN_TEST(test_the_closed_ride_keeps_its_own_counter);
+    RUN_TEST(test_the_closed_counter_wraps);
+    RUN_TEST(test_the_closed_counter_restarts_when_the_tester_reopens);
     return UNITY_END();
 }
