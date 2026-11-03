@@ -130,9 +130,14 @@ void hal_hsem_release(uint8_t id, const hal_hsem_key_t* key)
     }
 }
 
+/* A seq_cst read-modify-write on a private word: a full barrier for the host model that
+ * GCC also accepts under -fsanitize=thread (it rejects atomic_thread_fence there). The slot
+ * data itself is ordered by the take (acquire) and release (release) of the owner word. */
+static uint32_t barrier_word;
+
 void hal_hsem_barrier(void)
 {
-    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    (void)__atomic_fetch_add(&barrier_word, 0u, __ATOMIC_SEQ_CST);
 }
 
 void hal_hsem_release_own(uint8_t id)
