@@ -30,7 +30,7 @@
  * runs in its own, higher-priority task and shares only lock-free data with this one
  * (services/alive, services/snapshot).
  *
- * ride_records_take() (services/ride_records, D-098) is the comms task's one read of the
+ * The ride-record take (services/ride_records, D-098) is the comms task's one read of the
  * derived task's ride-record snapshot, right before uds_server_step() only because the
  * server answers 0xFD40-0xFD4E from the comms copy it fills; after 0x081 and 0x020, and a
  * copy only in the pass after a ride closed.
