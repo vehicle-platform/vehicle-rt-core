@@ -5,6 +5,7 @@
 #include "services/can_sm.h"
 #include "services/derived_inputs.h"
 #include "services/lean_health.h"
+#include "services/mailbox.h"
 #include "services/ride_records.h"
 #include "services/timebase.h"
 
@@ -111,6 +112,10 @@ void comms_pass(uds_client_t* client, uds_server_t* server, vehicle_republish_t*
                                         lean_tx_output_consumer_fault(lean),
                                         comms_ekf_registered(ekf) && !hb_stalled};
     lean_health_set_comms(&health);
+    /* The M7<->M4 mailbox (D-093): after 0x081 and 0x020, so their frames committed in this
+     * pass reach their slots in this pass; their send times do not move. Bounded, no wait
+     * (a refused HSEM defers to the next pass); inert before mailbox_init(). */
+    mailbox_step(timebase_now_ms());
     /* DIDs 0xFD40-0xFD4E (D-098): the one read of the derived task's ride-record snapshot,
      * here only because the server answers from the comms copy it fills. After 0x081 and
      * 0x020; a 205 B copy only in the pass after a ride closed. */

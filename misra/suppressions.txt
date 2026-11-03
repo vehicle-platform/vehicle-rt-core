@@ -10,3 +10,7 @@ misra-c2012-8.7:src/services/vehicle_signals.c
 misra-c2012-8.7:src/services/diag.c
 misra-c2012-8.7:src/features/uds/uds_server.c
 misra-c2012-8.7:src/features/uds/uds_server_core.c
+misra-c2012-19.2:src/services/mailbox_core.h
+misra-c2012-19.2:src/services/mailbox_core.c
+misra-c2012-19.2:src/services/mailbox.h
+misra-c2012-19.2:src/services/mailbox.c

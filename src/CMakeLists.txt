@@ -14,6 +14,7 @@ add_library(vehicle_rtcore_logic STATIC
     services/imu_core.c
     services/lean_health_core.c
     services/ride_records_core.c
+    services/mailbox_core.c
     features/cornering/lean_core.c
     features/cornering/lean_tx_core.c
     features/derived/derived_core.c
@@ -46,7 +47,7 @@ add_library(vehicle_defs_gen STATIC
 target_include_directories(vehicle_defs_gen PUBLIC ${VEHICLE_DEFS_GEN})
 
 # Firmware code above the HAL: services/ and the feature glue. It only uses the HAL
-# interfaces (hal/can_port.h, hal/hal_time.h, hal/hal_atomic.h, hal/imu.h), so the same objects serve the host
+# interfaces (hal/can_port.h, hal/hal_time.h, hal/hal_atomic.h, hal/imu.h, hal/hsem.h), so the same objects serve the host
 # program and the H7; each platform links its own hal/ implementation.
 add_library(vehicle_rtcore_fw STATIC
     services/timebase.c
@@ -62,6 +63,7 @@ add_library(vehicle_rtcore_fw STATIC
     services/derived_inputs.c
     services/ride_records.c
     services/tester_epoch.c
+    services/mailbox.c
     features/uds/isotp_link.c
     features/uds/uds_client.c
     features/uds/uds_server.c
@@ -85,6 +87,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         hal/host/hal_time_host.c
         hal/host/hal_atomic_host.c
         hal/host/imu_host.c
+        hal/host/hsem_host.c
     )
     target_link_libraries(vehicle_rtcore_hal_host PUBLIC vehicle_rtcore_logic)
     target_compile_definitions(vehicle_rtcore_hal_host PRIVATE _POSIX_C_SOURCE=200809L)
