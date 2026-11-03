@@ -9,6 +9,7 @@
  *   can_sm_step(PLATFORM) -> can_if_dispatch(PLATFORM) -> vehicle_republish_step()
  *                                                      -> heartbeat_step()
  *                                                      -> lean_tx_step()  (0x020)
+ *                                                      -> the M7<->M4 mailbox pass (D-093)
  *                                                      -> uds_server_step()
  * The client steps before the server: the server reports what the client wrote in the
  * same pass (services/diag, vehicle_signals), and the vehicle tester's step period

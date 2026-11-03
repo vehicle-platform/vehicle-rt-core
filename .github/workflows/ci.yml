@@ -175,6 +175,48 @@ jobs:
             echo "::error::ride_records_read() is for the UDS server only: src/features/uds/uds_server.c"
             exit 1
           fi
+          # D-093 M7<->M4 mailbox: the HSEM interface is used by the mailbox glue only (one
+          # accessing context per slot per core; nothing but the locked-section helpers runs
+          # while a take holds the interrupt mask), the pure core stays HAL- and feature-free,
+          # one offer call site (com_send(), committed frames only) and one step call site
+          # (the comms pass), and only the mailbox modules see the generated layout.
+          if grep -rnE --include='*.c' --include='*.h' '#include[[:space:]]+"hal/hsem\.h"' src \
+              | grep -vE '^src/(services/mailbox\.c|hal/)'; then
+            echo "::error::hal/hsem.h is for src/services/mailbox.c (and hal/) only"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'hal_hsem_(take|release|barrier|release_own)[[:space:]]*\(' src \
+              | grep -vE '^src/(services/mailbox\.c|hal/)'; then
+            echo "::error::the HSEM functions are called by src/services/mailbox.c only"
+            exit 1
+          fi
+          if grep -nE '#include[[:space:]]+"(hal|features)/' src/services/mailbox_core.c src/services/mailbox_core.h; then
+            echo "::error::services/mailbox_core is pure: no hal/ or features/ include"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'mailbox_offer[[:space:]]*\(' src \
+              | grep -vE '^src/services/(com\.c|mailbox\.(c|h)):'; then
+            echo "::error::mailbox_offer() has one call site: src/services/com.c (committed frames only)"
+            exit 1
+          fi
+          # com_send() feeds mailbox_offer(), so its callers must all be comms-task senders
+          # (one accessing context per mailbox slot on the M7, safety-reviewer NIT-1): a new
+          # sender, e.g. 0x120, is added here only once it runs in the comms task.
+          if grep -rnE --include='*.c' --include='*.h' 'com_send[[:space:]]*\(' src \
+              | grep -vE '^src/(services/(com|mailbox)\.(c|h)|features/(heartbeat/heartbeat|cornering/lean_tx|vehicle_republish/vehicle_republish)\.c):'; then
+            echo "::error::com_send() callers are the comms-task senders only (heartbeat, lean_tx, vehicle_republish)"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'mailbox_step[[:space:]]*\(' src \
+              | grep -vE '^src/(app/comms\.c|services/mailbox\.(c|h)):'; then
+            echo "::error::mailbox_step() has one call site: src/app/comms.c (the comms task)"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' '#include[[:space:]]+"(platform_mailbox|services/mailbox(_core)?)\.h"' src \
+              | grep -vE '^src/(services/(mailbox|mailbox_core|com)\.(c|h)|app/(comms\.c|host/))'; then
+            echo "::error::the mailbox layout and services are included by services/mailbox*, services/com.c and app/comms.c only"
+            exit 1
+          fi
 
       - name: Static analysis (cppcheck, blocking)
         run: |

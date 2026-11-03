@@ -121,3 +121,13 @@ vehicle_host_test(test_ride_records vehicle_rtcore_fw vehicle_rtcore_hal_host)
 # The ride-record hand-over derived task -> comms task (D-098): two threads on the real service.
 vehicle_host_test(test_ride_records_stress vehicle_rtcore_fw vehicle_rtcore_hal_host Threads::Threads)
 set_tests_properties(test_ride_records_stress PROPERTIES TIMEOUT 60)
+# D-093 M7<->M4 mailbox, M7 side: the pure core, the glue on the host HSEM model, a
+# two-thread model of both cores (also under ThreadSanitizer), every interleaving at the
+# HSEM operations on a hooked test double (the test defines hal_hsem_*, so the archive's
+# host port is not pulled), and 0x081/0x020 timing with the mailbox in the comms pass.
+vehicle_host_test(test_mailbox_core)
+vehicle_host_test(test_mailbox vehicle_rtcore_fw vehicle_rtcore_hal_host)
+vehicle_host_test(test_mailbox_stress vehicle_rtcore_fw vehicle_rtcore_hal_host Threads::Threads)
+set_tests_properties(test_mailbox_stress PROPERTIES TIMEOUT 120)
+vehicle_host_test(test_mailbox_interleave vehicle_rtcore_fw vehicle_rtcore_hal_host)
+vehicle_host_test(test_comms_mailbox vehicle_rtcore_fw vehicle_rtcore_sim vehicle_rtcore_hal_host)
