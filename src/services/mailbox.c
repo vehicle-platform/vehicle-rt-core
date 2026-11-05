@@ -3,7 +3,9 @@
 #include "hal/hsem.h"
 #include "platform.h"
 #include "platform_e2e.h"
+#include "platform_uds.h"
 #include "services/can_if.h"
+#include "services/diag.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -97,6 +99,16 @@ static mailbox_reader_t mb_reader[PLATFORM_MAILBOX_SLOT_COUNT];   /* M4->M7 slot
 static bool mb_mismatch;            /* the M4 layout word differed at the last step */
 static uint32_t mb_mismatch_since_ms;
 static uint32_t mb_grace_ms;        /* the shortest M4->M7 E2E timeout */
+/* DTC state (D-093 amendment 3 + addendum). The flags are latched in mailbox_step() only
+ * and sticky against the ms wrap; mailbox_health() reads them and changes nothing. */
+static bool mb_matched_once;        /* the M4 layout word matched at a step since init */
+static uint32_t mb_init_ms;
+static bool mb_boot_budget_over;    /* MAILBOX_PEER_BOOT_BUDGET_MS passed since init */
+static bool mb_mismatch_over_grace; /* the current mismatch run outlasted mb_grace_ms */
+static uint32_t mb_match_since_ms;  /* start of the current matched run */
+static bool mb_armed[PLATFORM_MAILBOX_SLOT_COUNT];    /* matched run > the slot's timeout */
+static bool mb_seen_new[PLATFORM_MAILBOX_SLOT_COUNT]; /* a new M4 frame read since init */
+static uint32_t mb_frozen_held;     /* the last reported frozen mask (short mismatch) */
 static uint32_t mb_skipped;
 
 static uint32_t mb_sat_add(uint32_t a, uint32_t b)
@@ -125,11 +137,19 @@ bool mailbox_init(volatile mailbox_region_t* region, uint32_t now_ms)
     mb_region = NULL;
     mb_mismatch = false;
     mb_mismatch_since_ms = now_ms;
+    mb_matched_once = false;
+    mb_init_ms = now_ms;
+    mb_boot_budget_over = false;
+    mb_mismatch_over_grace = false;
+    mb_match_since_ms = now_ms;
+    mb_frozen_held = 0u;
     mb_skipped = 0u;
     mb_grace_ms = UINT32_MAX;
     for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
         mailbox_pending_init(&mb_pending[i]);
         mailbox_reader_init(&mb_reader[i], slot_defs[i].length);
+        mb_armed[i] = false;
+        mb_seen_new[i] = false;
         if (m7_reads(i) && (slot_defs[i].timeout_ms < mb_grace_ms)) {
             mb_grace_ms = slot_defs[i].timeout_ms;
         }
@@ -218,6 +238,7 @@ static void read_slot(uint32_t i, bool peer_ok, uint32_t now_ms)
     mailbox_slot_load(&mb_region->word[slot_word(i)], &raw);
     hal_hsem_release(slot_defs[i].hsem_id, &key);
     if (mailbox_reader_accept(&mb_reader[i], &raw, peer_ok, now_ms) == MAILBOX_READ_NEW) {
+        mb_seen_new[i] = true;
         uint8_t data[MAILBOX_PAYLOAD_BYTES];
         mailbox_payload_bytes(raw.data, data);
         (void)mailbox_pending_offer(&mb_pending[i], data, slot_defs[i].length);
@@ -248,6 +269,69 @@ static void forward_slot(uint32_t i)
     }
 }
 
+static bool mismatch_past_grace(uint32_t now_ms)
+{
+    return mb_mismatch && ((uint32_t)(now_ms - mb_mismatch_since_ms) > mb_grace_ms);
+}
+
+/* Once per initialised step, after the slots were read: the sticky latches. */
+static void update_latches(uint32_t now_ms)
+{
+    if (!mb_boot_budget_over && ((uint32_t)(now_ms - mb_init_ms) > MAILBOX_PEER_BOOT_BUDGET_MS)) {
+        mb_boot_budget_over = true;
+    }
+    if (mismatch_past_grace(now_ms)) {
+        mb_mismatch_over_grace = true;
+    }
+    if (mb_matched_once && !mb_mismatch) {
+        const uint32_t matched_ms = (uint32_t)(now_ms - mb_match_since_ms);
+        for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
+            if (m7_reads(i) && (matched_ms > slot_defs[i].timeout_ms)) {
+                mb_armed[i] = true;
+            }
+        }
+    }
+}
+
+/* The DTC levels, one definition for mailbox_health() and the report; reads the latches.
+ * - Mismatch: before the first match the M4 is booting, not mismatched, so only the boot
+ *   budget arms it (peer missing or other defs); after a match, a mismatch past the grace.
+ * - Frozen: only while the layouts match; a slot counts once the matched run outlasted its
+ *   E2E timeout (armed) and it delivered a new frame since init, or the boot budget is over
+ *   (after a warm reset SRAM4 still holds a matching M4 word while the M4 initialises).
+ *   During a mismatch still inside the grace the last frozen level holds, so a one-pass
+ *   wipe opens no passed gap. */
+static void dtc_levels(uint32_t now_ms, bool* mismatch_dtc, uint32_t* frozen)
+{
+    *mismatch_dtc = mb_matched_once ? mb_mismatch_over_grace : mb_boot_budget_over;
+    *frozen = 0u;
+    if (mb_matched_once && !mb_mismatch) {
+        for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
+            if (m7_reads(i) && mb_armed[i] && (mb_seen_new[i] || mb_boot_budget_over) &&
+                mailbox_reader_stale(&mb_reader[i], now_ms, slot_defs[i].timeout_ms)) {
+                *frozen |= ((uint32_t)1u << i);
+            }
+        }
+    } else if (mb_matched_once && !mb_mismatch_over_grace) {
+        *frozen = mb_frozen_held;
+    } else {
+        /* never matched, or a mismatch past the grace: the mismatch DTC covers it */
+    }
+}
+
+/* Level-triggered every initialised pass; nothing while inert (the monitors do not run).
+ * Diagnostic only: neither DTC sets the heartbeat's DEGRADED or ERROR_COUNT (diag.c). */
+static void report_dtcs(uint32_t now_ms)
+{
+    bool mismatch_dtc;
+    uint32_t frozen;
+    update_latches(now_ms);
+    dtc_levels(now_ms, &mismatch_dtc, &frozen);
+    mb_frozen_held = frozen;
+    diag_dtc_report(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH, mismatch_dtc);
+    diag_dtc_report(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN, !mismatch_dtc && (frozen != 0u));
+}
+
 void mailbox_step(uint32_t now_ms)
 {
     if (mb_region == NULL) {
@@ -260,7 +344,16 @@ void mailbox_step(uint32_t now_ms)
     mb_region->word[MAILBOX_M7_LAYOUT_WORD] = PLATFORM_MAILBOX_LAYOUT_ID;
     const bool peer_ok = mb_region->word[MAILBOX_M4_LAYOUT_WORD] == PLATFORM_MAILBOX_LAYOUT_ID;
     if (peer_ok) {
+        if (!mb_matched_once || mb_mismatch_over_grace) {
+            /* a new matched run starts; a mismatch inside the grace does not restart it */
+            mb_match_since_ms = now_ms;
+            for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
+                mb_armed[i] = false;
+            }
+        }
+        mb_matched_once = true;
         mb_mismatch = false;
+        mb_mismatch_over_grace = false;
     } else if (!mb_mismatch) {
         mb_mismatch = true;
         mb_mismatch_since_ms = now_ms;
@@ -277,9 +370,10 @@ void mailbox_step(uint32_t now_ms)
             /* no other direction exists (gen/ check) */
         }
     }
+    report_dtcs(now_ms);
 }
 
-// cppcheck-suppress misra-c2012-8.7 ; DEV-002: read by the future mailbox DTC/health reporting and the tests
+// cppcheck-suppress misra-c2012-8.7 ; DEV-002: read by the tests and the future health DID
 mailbox_health_t mailbox_health(uint32_t now_ms)
 {
     mailbox_health_t h;
@@ -289,7 +383,10 @@ mailbox_health_t mailbox_health(uint32_t now_ms)
         return h;
     }
     h.initialised = true;
-    h.layout_mismatch = mb_mismatch && ((uint32_t)(now_ms - mb_mismatch_since_ms) > mb_grace_ms);
+    h.layout_mismatch = mismatch_past_grace(now_ms);
+    dtc_levels(now_ms, &h.dtc_layout_mismatch, &h.frozen_slots);
+    h.peer_missing = !mb_matched_once && mb_boot_budget_over;
+    h.dtc_slot_frozen = !h.dtc_layout_mismatch && (h.frozen_slots != 0u);
     for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
         const mailbox_pending_t* const p = &mb_pending[i];
         if (m7_writes(i)) {

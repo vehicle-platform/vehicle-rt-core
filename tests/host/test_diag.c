@@ -335,6 +335,22 @@ static void test_supervise_of_a_missing_status_is_one_onset(void)
     TEST_ASSERT_EQUAL_UINT32(1u, diag_fault_onsets());
 }
 
+/* D-093 amendment 3 addendum (user 2026-11-05): the mailbox DTCs are diagnostic only. */
+static void test_the_mailbox_dtcs_set_their_status_but_not_the_heartbeat_summary(void)
+{
+    diag_init(0u);
+    diag_dtc_report(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH, true);
+    diag_dtc_report(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN, true);
+    TEST_ASSERT_NOT_EQUAL(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH) & 0x01u);
+    TEST_ASSERT_NOT_EQUAL(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN) & 0x01u);
+    TEST_ASSERT_FALSE(diag_fault_active());
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+    /* an rt-core DTC still counts */
+    diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED, true);
+    TEST_ASSERT_TRUE(diag_fault_active());
+    TEST_ASSERT_EQUAL_UINT32(1u, diag_fault_onsets());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -365,5 +381,6 @@ int main(void)
     RUN_TEST(test_fault_onsets_count_passed_to_failed_transitions_only);
     RUN_TEST(test_a_clear_keeps_the_fault_summary_and_init_resets_it);
     RUN_TEST(test_supervise_of_a_missing_status_is_one_onset);
+    RUN_TEST(test_the_mailbox_dtcs_set_their_status_but_not_the_heartbeat_summary);
     return UNITY_END();
 }

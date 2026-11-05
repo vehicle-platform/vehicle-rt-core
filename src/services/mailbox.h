@@ -46,10 +46,27 @@
 extern "C" {
 #endif
 
+/* D-101 item 3 (provisional, the same value as safety-node's SAFETY_APP_PEER_BOOT_BUDGET_MS):
+ * longest time after mailbox_init() an M4 layout word may stay unmatched before the M4 counts
+ * as missing or built from other defs (E-28 (6) board tests revisit it). */
+#define MAILBOX_PEER_BOOT_BUDGET_MS (2000u)
+
 typedef struct {
     bool initialised;
     bool layout_mismatch;      /* the M4 layout word differs for longer than the grace time */
+    bool peer_missing;         /* the M4 layout word never matched within the boot budget */
     uint32_t stale_slots;      /* bit i: M4->M7 slot i had no new frame within its E2E timeout */
+    uint32_t frozen_slots;     /* bit i: stale although the layouts have matched for longer
+                                * than slot i's E2E timeout, after slot i's first new frame
+                                * since init or the boot budget (the SLOT_FROZEN input; held
+                                * through a mismatch inside the grace) */
+    bool dtc_layout_mismatch;  /* SAFETY_MAILBOX_LAYOUT_MISMATCH: matched once and now a
+                                * mismatch past the grace, or never matched and peer_missing */
+    bool dtc_slot_frozen;      /* SAFETY_MAILBOX_SLOT_FROZEN: frozen_slots != 0 and not
+                                * dtc_layout_mismatch (one root cause = one DTC). Both DTCs
+                                * are diagnostic only: no heartbeat DEGRADED / ERROR_COUNT.
+                                * The dtc_ and frozen fields use the flags latched by the
+                                * last mailbox_step(); the stale check is evaluated at now. */
     uint32_t write_done;       /* M7->M4 frames committed */
     uint32_t write_deferred;   /* passes a pending M7->M4 frame waited for its HSEM */
     uint32_t write_overruns;   /* M7->M4 frames replaced before they were written */

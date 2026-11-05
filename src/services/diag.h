@@ -7,8 +7,9 @@
  * reports (0xFD00, 0xFD02; D-040, D-055). The UDS client glue writes the status, the
  * step counters and its DTC results; the UDS server glue reads them, clears the DTCs and
  * reports its own monitors (VEHICLE_TESTER_LATCHED supervision, VEHICLE_BUS_OFF_LATCHED
- * from services/can_sm). Neither feature includes the other, and diag includes no other
- * service.
+ * from services/can_sm); services/mailbox reports the two diagnostic-only mailbox DTCs
+ * every initialised step (D-093 amendment 3). Neither feature includes the other, and
+ * diag includes no other service.
  *
  * DTCs are the gen/ table (platform_uds.h, platform_uds_dtcs[]), indexed by
  * platform_uds_dtc_index_t. A monitor reports its test result every pass
@@ -71,14 +72,17 @@ void diag_dtc_report(uint32_t idx, bool failed);
 /* DTCStatusMask of DTC index idx; 0 if out of range. */
 uint8_t diag_dtc_status(uint32_t idx);
 
-/* True while any DTC monitor's last reported result is failed (D-064: the heartbeat's
- * DEGRADED). Not changed by diag_dtc_clear_all(): a clear hides no active fault.
- * Every DTC in the gen/ table counts: a new DTC must be classified for the heartbeat
- * first, since DEGRADED switches safety-node to its fallback lean (D-042 item 3). */
+/* True while any heartbeat-class DTC monitor's last reported result is failed (D-064:
+ * the heartbeat's DEGRADED). Not changed by diag_dtc_clear_all(): a clear hides no
+ * active fault. Every gen/ DTC counts except the diagnostic-only mailbox DTCs
+ * (SAFETY_MAILBOX_*, D-093 amendment 3 addendum): a new DTC must be classified for the
+ * heartbeat first (diag.c), since DEGRADED switches safety-node to its fallback lean
+ * (D-042 item 3). */
 bool diag_fault_active(void);
 
 /* Faults detected since diag_init() (D-064: the heartbeat's ERROR_COUNT): the number of
- * times a monitor's result went from passed (or not yet reported) to failed. Saturates
+ * times a heartbeat-class monitor's result went from passed (or not yet reported) to
+ * failed (the diagnostic-only mailbox DTCs are not counted). Saturates
  * at UINT32_MAX; diag_dtc_clear_all() neither resets nor re-triggers it. */
 uint32_t diag_fault_onsets(void);
 
