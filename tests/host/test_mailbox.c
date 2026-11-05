@@ -18,6 +18,8 @@
 #include "services/can_if.h"
 #include "services/can_sm.h"
 #include "services/com.h"
+#include "services/diag.h"
+#include "platform_uds.h"
 
 #include <string.h>
 #include <unity.h>
@@ -38,6 +40,9 @@
 #define WARN_TIMEOUT PLATFORM_SAFETY_WARNING_STATUS_E2E_TIMEOUT_MS
 
 #define HBS_IDX PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_INDEX
+#define HBS_LEN ((uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_LENGTH)
+#define HBS_HSEM ((uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_HSEM_ID)
+#define HBS_WORD (PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_OFFSET / MAILBOX_WORD_BYTES)
 #define HBS_TIMEOUT PLATFORM_HEARTBEAT_SAFETY_E2E_TIMEOUT_MS
 
 #define PATTERN 0x5A5A5A5Au
@@ -67,24 +72,30 @@ static void m4_write_layout(uint32_t id)
     region.word[MAILBOX_M4_LAYOUT_WORD] = id;
 }
 
-/* The M4 writes frame k of 0x023 under its HSEM; false if the HSEM was refused. */
-static bool m4_write_warn(uint8_t k, uint8_t len)
+/* The M4 writes frame k into the slot at word under its HSEM; false if it was refused. */
+static bool m4_write_slot(uint8_t hsem, uint32_t word, uint8_t k, uint8_t len)
 {
     uint8_t d[MAILBOX_PAYLOAD_BYTES];
     frame(k, len, d);
     TEST_ASSERT_TRUE(mailbox_pending_offer(&m4_writer, d, len));
     hsem_host_set_core(HSEM_HOST_CORE_M4);
     hal_hsem_key_t key;
-    const bool ok = hal_hsem_take(WARN_HSEM, &key);
+    const bool ok = hal_hsem_take(hsem, &key);
     if (ok) {
-        mailbox_slot_store(&m4_writer, &region.word[WARN_WORD]);
+        mailbox_slot_store(&m4_writer, &region.word[word]);
         hal_hsem_barrier();
-        mailbox_slot_commit(&region.word[WARN_WORD]);
-        hal_hsem_release(WARN_HSEM, &key);
+        mailbox_slot_commit(&region.word[word]);
+        hal_hsem_release(hsem, &key);
         mailbox_pending_done(&m4_writer);
     }
     hsem_host_set_core(HSEM_HOST_CORE_M7);
     return ok;
+}
+
+/* The M4 writes frame k of 0x023 under its HSEM; false if the HSEM was refused. */
+static bool m4_write_warn(uint8_t k, uint8_t len)
+{
+    return m4_write_slot(WARN_HSEM, WARN_WORD, k, len);
 }
 
 /* The M4 reads 0x020; MAILBOX_READ_NONE when the HSEM was refused. */
@@ -125,6 +136,7 @@ void setUp(void)
     can_if_init(); /* filters in boot(), after mailbox_init() */
     mailbox_pending_init(&m4_writer);
     mailbox_reader_init(&m4_reader, LEAN_LEN);
+    diag_init(T0);
 }
 
 void tearDown(void)
@@ -502,6 +514,234 @@ static void test_m4_slots_without_new_frames_read_as_stale(void)
     TEST_ASSERT_EQUAL_HEX32(0u, mailbox_health(now).stale_slots & warn_bit);
 }
 
+/* -------------------------------------------- DTCs (D-093 amendment 3, E-28 (3)) */
+
+#define DTC_MISMATCH PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH
+#define DTC_FROZEN PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN
+#define TEST_FAILED_BIT 0x01u
+
+static bool dtc_failed(uint32_t idx)
+{
+    return (diag_dtc_status(idx) & TEST_FAILED_BIT) != 0u;
+}
+
+/* Steps every ms up to (excluding) until; a writing M4 refreshes 0x023 and 0x082 on their
+ * gen/ cycles, counted from the call. */
+static void run_until(uint32_t until, bool m4_writes)
+{
+    uint32_t k = 0u;
+    const uint32_t from = now;
+    while (now < until) {
+        const uint32_t t = now - from;
+        if (m4_writes && ((t % PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS) == 0u)) {
+            TEST_ASSERT_TRUE(m4_write_slot(WARN_HSEM, WARN_WORD, (uint8_t)k, WARN_LEN));
+        }
+        if (m4_writes && ((t % PLATFORM_HEARTBEAT_SAFETY_CYCLE_TIME_MS) == 0u)) {
+            TEST_ASSERT_TRUE(m4_write_slot(HBS_HSEM, HBS_WORD, (uint8_t)k, HBS_LEN));
+        }
+        k++;
+        step();
+    }
+}
+
+static void test_a_healthy_m4_raises_no_mailbox_dtc(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 3000u, true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_an_m4_that_never_matches_fails_the_mismatch_dtc_after_the_boot_budget(void)
+{
+    boot(); /* the M4 word still holds the power-up pattern */
+    run_until(T0 + MAILBOX_PEER_BOOT_BUDGET_MS + 1u, false);
+    /* the old flag is up after the 60 ms grace, but a booting M4 is not a mismatch */
+    TEST_ASSERT_TRUE(mailbox_health(now).layout_mismatch);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+    step(); /* T0 + budget + 1 */
+    TEST_ASSERT_TRUE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    /* diagnostic only (addendum): no heartbeat DEGRADED, no ERROR_COUNT onset */
+    TEST_ASSERT_FALSE(diag_fault_active());
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_TRUE(h.peer_missing);
+    TEST_ASSERT_TRUE(h.dtc_layout_mismatch);
+    TEST_ASSERT_FALSE(h.dtc_slot_frozen);
+    /* a matching M4 that finally writes clears it in the next pass */
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    run_until(now + 1000u, true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_NOT_EQUAL(0u, diag_dtc_status(DTC_MISMATCH) & 0x08u); /* confirmed stays */
+}
+
+static void test_an_m4_up_within_the_boot_budget_raises_nothing(void)
+{
+    boot();
+    run_until(T0 + MAILBOX_PEER_BOOT_BUDGET_MS - 100u, false);
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    run_until(T0 + (3u * MAILBOX_PEER_BOOT_BUDGET_MS), true);
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_slots_not_yet_written_after_a_match_raise_nothing_within_their_timeout(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    /* the M4 matches at once but writes its first frames late, each inside its timeout */
+    run_until(T0 + WARN_TIMEOUT - 10u, false);
+    /* 0x023 from here on its cycle; 0x082 only just inside its own timeout */
+    uint8_t k = 1u;
+    while (now < (T0 + HBS_TIMEOUT - 10u)) {
+        TEST_ASSERT_TRUE(m4_write_slot(WARN_HSEM, WARN_WORD, k, WARN_LEN));
+        k++;
+        run_until(now + PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS, false);
+    }
+    TEST_ASSERT_TRUE(m4_write_slot(HBS_HSEM, HBS_WORD, 1u, HBS_LEN));
+    step();
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+    run_until(T0 + 2000u, true);
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_a_matched_m4_that_stops_writing_fails_only_the_frozen_dtc(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 1000u, true);
+    const uint32_t last = now - 1u - ((now - 1u - T0) % PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS);
+    run_until(last + WARN_TIMEOUT + 2u, false); /* 0x023 had no frame for its timeout */
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_EQUAL_HEX32((uint32_t)1u << WARN_IDX,
+                            mailbox_health(now).frozen_slots & ((uint32_t)1u << WARN_IDX));
+    TEST_ASSERT_FALSE(diag_fault_active());
+    run_until(now + 500u, true); /* it writes again */
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_a_mismatch_after_a_match_fails_only_the_mismatch_dtc(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 1000u, true);
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID ^ 1u); /* an M4 reflashed from other defs */
+    const uint32_t from = now;
+    run_until(from + WARN_TIMEOUT + 1u, true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH)); /* within the grace */
+    run_until(from + HBS_TIMEOUT + 100u, true);
+    TEST_ASSERT_TRUE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN)); /* the slots are stale too: one root cause */
+    TEST_ASSERT_NOT_EQUAL(0u, mailbox_health(now).stale_slots);
+    TEST_ASSERT_FALSE(mailbox_health(now).peer_missing); /* it had matched */
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    run_until(now + 1000u, true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_a_warm_reset_with_a_matching_word_raises_nothing_inside_the_budget(void)
+{
+    /* SRAM4 kept the M4 word over the reset; the M4 is still initialising */
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + WARN_TIMEOUT + HBS_TIMEOUT, false); /* first frames far past timeout */
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    run_until(T0 + MAILBOX_PEER_BOOT_BUDGET_MS - 100u, false);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    run_until(T0 + (2u * MAILBOX_PEER_BOOT_BUDGET_MS), true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+}
+
+static void test_a_matched_m4_that_never_writes_fails_frozen_after_the_boot_budget(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + MAILBOX_PEER_BOOT_BUDGET_MS + 1u, false);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    step();
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_EQUAL_HEX32(((uint32_t)1u << WARN_IDX) | ((uint32_t)1u << HBS_IDX),
+                            mailbox_health(now).frozen_slots);
+}
+
+static void test_only_a_stuck_0x082_fails_frozen_with_its_bit_alone(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 1000u, true);
+    uint8_t k = 1u;
+    const uint32_t until = now + HBS_TIMEOUT + 150u;
+    while (now < until) { /* 0x023 healthy on its cycle, 0x082 no longer written */
+        TEST_ASSERT_TRUE(m4_write_slot(WARN_HSEM, WARN_WORD, k, WARN_LEN));
+        k++;
+        run_until(now + PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS, false);
+    }
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_EQUAL_HEX32((uint32_t)1u << HBS_IDX, mailbox_health(now).frozen_slots);
+}
+
+static void test_a_short_word_wipe_keeps_a_failing_frozen_dtc(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 1000u, true);
+    run_until(now + HBS_TIMEOUT + 10u, false); /* both slots frozen */
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    m4_write_layout(0u); /* wiped for one pass */
+    step();
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    step();
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN)); /* still frozen, no passed gap */
+    m4_write_layout(0u); /* now a mismatch that outlasts the grace: the mismatch DTC */
+    run_until(now + WARN_TIMEOUT + 2u, false);
+    TEST_ASSERT_TRUE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+}
+
+static void test_a_clear_while_failing_sets_the_status_again_on_the_next_pass(void)
+{
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    boot();
+    run_until(T0 + 1000u, true);
+    run_until(now + WARN_TIMEOUT + 5u, false);
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    diag_dtc_clear_all();
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    step();
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_dropped_writes_alone_raise_no_dtc(void)
+{
+    boot(); /* M7 first: its heartbeat frames are dropped until the M4 matches */
+    offer_lean(1u);
+    step();
+    TEST_ASSERT_NOT_EQUAL(0u, mailbox_health(now).write_dropped);
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    run_until(T0 + 1000u, true);
+    TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
+}
+
+static void test_an_inert_mailbox_reports_no_dtc(void)
+{
+    mailbox_step(T0 + 10000u);
+    TEST_ASSERT_EQUAL_HEX8(0u, diag_dtc_status(DTC_MISMATCH));
+    TEST_ASSERT_EQUAL_HEX8(0u, diag_dtc_status(DTC_FROZEN));
+}
+
 static void test_the_forward_retries_on_tx_full_and_drops_on_bus_off(void)
 {
     boot_with_m4();
@@ -616,5 +856,18 @@ int main(void)
     RUN_TEST(test_the_forwarded_ids_get_dedicated_tx_buffers);
     RUN_TEST(test_init_after_the_filters_is_refused_and_inert);
     RUN_TEST(test_com_send_offers_only_committed_frames);
+    RUN_TEST(test_a_healthy_m4_raises_no_mailbox_dtc);
+    RUN_TEST(test_an_m4_that_never_matches_fails_the_mismatch_dtc_after_the_boot_budget);
+    RUN_TEST(test_an_m4_up_within_the_boot_budget_raises_nothing);
+    RUN_TEST(test_slots_not_yet_written_after_a_match_raise_nothing_within_their_timeout);
+    RUN_TEST(test_a_matched_m4_that_stops_writing_fails_only_the_frozen_dtc);
+    RUN_TEST(test_a_mismatch_after_a_match_fails_only_the_mismatch_dtc);
+    RUN_TEST(test_a_warm_reset_with_a_matching_word_raises_nothing_inside_the_budget);
+    RUN_TEST(test_a_matched_m4_that_never_writes_fails_frozen_after_the_boot_budget);
+    RUN_TEST(test_only_a_stuck_0x082_fails_frozen_with_its_bit_alone);
+    RUN_TEST(test_a_short_word_wipe_keeps_a_failing_frozen_dtc);
+    RUN_TEST(test_a_clear_while_failing_sets_the_status_again_on_the_next_pass);
+    RUN_TEST(test_dropped_writes_alone_raise_no_dtc);
+    RUN_TEST(test_an_inert_mailbox_reports_no_dtc);
     return UNITY_END();
 }

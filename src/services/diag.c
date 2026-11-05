@@ -27,6 +27,17 @@ static uint32_t steps_stamp_ms;
 static bool steps_seen;
 static bool steps_lost; /* sticky like tester_lost, until the next write */
 
+/* The heartbeat class of a DTC (D-064 item 1, D-093 amendment 3 addendum, user
+ * 2026-11-05): the mailbox DTCs describe the M4 partition, not rt-core, so they are
+ * diagnostic only: they set their status bytes but neither DEGRADED nor ERROR_COUNT
+ * (as safety-node never names rt-core for its own faults, D-101 item 1). Every other
+ * DTC counts; a new DTC is classified here first. */
+static bool counts_for_heartbeat(uint32_t idx)
+{
+    return (idx != (uint32_t)PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH) &&
+           (idx != (uint32_t)PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN);
+}
+
 static bool tester_fresh(uint32_t now_ms)
 {
     return tester_seen && !tester_lost &&
@@ -66,7 +77,7 @@ void diag_dtc_report(uint32_t idx, bool failed)
     if (idx >= PLATFORM_UDS_DTC_COUNT) {
         return;
     }
-    if (failed && !monitor_failed[idx] && (fault_onsets < UINT32_MAX)) {
+    if (failed && !monitor_failed[idx] && counts_for_heartbeat(idx) && (fault_onsets < UINT32_MAX)) {
         fault_onsets++;
     }
     monitor_failed[idx] = failed;
@@ -86,7 +97,7 @@ bool diag_fault_active(void)
 {
     bool active = false;
     for (uint32_t i = 0u; i < PLATFORM_UDS_DTC_COUNT; i++) {
-        active = active || monitor_failed[i];
+        active = active || (monitor_failed[i] && counts_for_heartbeat(i));
     }
     return active;
 }
