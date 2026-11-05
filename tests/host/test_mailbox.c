@@ -544,6 +544,20 @@ static void run_until(uint32_t until, bool m4_writes)
     }
 }
 
+/* Wrap-safe: steps ms passes (run_until compares absolute times). */
+static void run_for(uint32_t ms, bool m4_writes)
+{
+    for (uint32_t t = 0u; t < ms; t++) {
+        if (m4_writes && ((t % PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS) == 0u)) {
+            TEST_ASSERT_TRUE(m4_write_slot(WARN_HSEM, WARN_WORD, (uint8_t)t, WARN_LEN));
+        }
+        if (m4_writes && ((t % PLATFORM_HEARTBEAT_SAFETY_CYCLE_TIME_MS) == 0u)) {
+            TEST_ASSERT_TRUE(m4_write_slot(HBS_HSEM, HBS_WORD, (uint8_t)t, HBS_LEN));
+        }
+        step();
+    }
+}
+
 static void test_a_healthy_m4_raises_no_mailbox_dtc(void)
 {
     m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
@@ -724,6 +738,23 @@ static void test_a_clear_while_failing_sets_the_status_again_on_the_next_pass(vo
     TEST_ASSERT_EQUAL_UINT32(0u, diag_fault_onsets());
 }
 
+static void test_the_dtc_latches_hold_across_the_ms_wrap(void)
+{
+    now = UINT32_MAX - 500u; /* the boot budget and the matched run cross the wrap */
+    hal_time_host_use_manual(now);
+    diag_init(now);
+    boot();
+    run_for(MAILBOX_PEER_BOOT_BUDGET_MS + 2u, false);
+    TEST_ASSERT_TRUE(now < 5000u); /* wrapped */
+    TEST_ASSERT_TRUE(dtc_failed(DTC_MISMATCH)); /* never matched, budget over */
+    m4_write_layout(PLATFORM_MAILBOX_LAYOUT_ID);
+    run_for(1000u, true);
+    TEST_ASSERT_FALSE(dtc_failed(DTC_MISMATCH));
+    TEST_ASSERT_FALSE(dtc_failed(DTC_FROZEN));
+    run_for(HBS_TIMEOUT + 10u, false);
+    TEST_ASSERT_TRUE(dtc_failed(DTC_FROZEN));
+}
+
 static void test_dropped_writes_alone_raise_no_dtc(void)
 {
     boot(); /* M7 first: its heartbeat frames are dropped until the M4 matches */
@@ -867,6 +898,7 @@ int main(void)
     RUN_TEST(test_only_a_stuck_0x082_fails_frozen_with_its_bit_alone);
     RUN_TEST(test_a_short_word_wipe_keeps_a_failing_frozen_dtc);
     RUN_TEST(test_a_clear_while_failing_sets_the_status_again_on_the_next_pass);
+    RUN_TEST(test_the_dtc_latches_hold_across_the_ms_wrap);
     RUN_TEST(test_dropped_writes_alone_raise_no_dtc);
     RUN_TEST(test_an_inert_mailbox_reports_no_dtc);
     return UNITY_END();

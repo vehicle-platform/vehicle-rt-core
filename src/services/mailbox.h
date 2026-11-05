@@ -66,7 +66,7 @@ typedef struct {
                                 * dtc_layout_mismatch (one root cause = one DTC). Both DTCs
                                 * are diagnostic only: no heartbeat DEGRADED / ERROR_COUNT.
                                 * The dtc_ and frozen fields use the flags latched by the
-                                * last mailbox_step(). */
+                                * last mailbox_step(); the stale check is evaluated at now. */
     uint32_t write_done;       /* M7->M4 frames committed */
     uint32_t write_deferred;   /* passes a pending M7->M4 frame waited for its HSEM */
     uint32_t write_overruns;   /* M7->M4 frames replaced before they were written */
