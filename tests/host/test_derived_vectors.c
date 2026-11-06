@@ -4,12 +4,13 @@
  * this only checks that the generated headers compile against the pinned gen/ headers and
  * are well formed: inputs and outputs in time order, every index inside its gen/ table,
  * an invalid row carries a flag and 0, a valid row none, every signal has a tolerance.
- * The expected values need the defs derived table they were generated from (v0.14.0, see
+ * The expected values need the defs derived table they were generated from (v0.24.0, see
  * vectors/README.md); this test does not depend on it.
  */
 #include "vectors/derived_accel_gears.h"
 #include "vectors/derived_edge_values.h"
 #include "vectors/derived_idle_warmup.h"
+#include "vectors/derived_start_idle_refuel.h"
 #include "vectors/derived_stale_gap.h"
 
 #include <math.h>
@@ -47,7 +48,7 @@ static void check_outputs(const derived_vector_output_t* out, uint32_t n,
     TEST_ASSERT_TRUE(n > 0u);
     for (uint32_t i = 0u; i < n; i++) {
         TEST_ASSERT_TRUE(out[i].signal < VEHICLE_CL250_DERIVED_COUNT);
-        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_ENGINE_OFF);
+        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_NO_FAN_STEP);
         TEST_ASSERT_TRUE(isfinite(out[i].value));
         TEST_ASSERT_TRUE(has_tol(tol, n_tol, out[i].signal));
         if (out[i].valid) {
@@ -95,6 +96,11 @@ static void test_edge_values_is_well_formed(void)
     CHECK_SCENARIO(derived_edge_values, DERIVED_EDGE_VALUES);
 }
 
+static void test_start_idle_refuel_is_well_formed(void)
+{
+    CHECK_SCENARIO(derived_start_idle_refuel, DERIVED_START_IDLE_REFUEL);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -102,5 +108,6 @@ int main(void)
     RUN_TEST(test_accel_gears_is_well_formed);
     RUN_TEST(test_stale_gap_is_well_formed);
     RUN_TEST(test_edge_values_is_well_formed);
+    RUN_TEST(test_start_idle_refuel_is_well_formed);
     return UNITY_END();
 }
