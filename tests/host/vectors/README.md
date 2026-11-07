@@ -10,26 +10,30 @@ cd vehicle-server && uv run vehicle-server golden --out ../vehicle-rt-core/tests
 - `derived_vectors.h`: row types, flag enum, tolerance type. `derived_<scenario>.h`: the
   DID inputs (`VEHICLE_CL250_IDX_*`, at each DID's poll period), the expected outputs
   (`VEHICLE_CL250_DERIVED_*`, valid or invalid with a flag) and one tolerance per signal
-  (defs `resolution` / 2). Scenarios: `idle_warmup`, `accel_gears`, `stale_gap`, `edge_values`.
-- Signals: class A with a formula in the reference, `ready_rt_core`, DID inputs only (28).
-- Defs version: generated from **vehicle-defs v0.19.0** (the banner of every header names the
+  (defs `resolution` / 2). Scenarios: `idle_warmup`, `accel_gears`, `stale_gap`, `edge_values`,
+  `start_idle_refuel`.
+- Signals: class A with a formula in the reference, `ready_rt_core`, DID inputs only (49).
+- Defs version: generated from **vehicle-defs v0.24.0** (the banner of every header names the
   version it came from). The expected outputs use that version's derived `stale_after_ms`
   (the age limit of a derived input) and, for a non-event DID input, that DID's own
   `stale_after_ms` of the gen vehicle table (D-070), so the features/derived test that
-  compares against them needs a pin with the same derived table (the rename-only v0.19.1 of
-  D-089 keeps it); `test_derived_vectors` checks the shape only; `test_derived_core` (features/derived, C3)
-  replays the scenarios through the core, compares every row and fingerprints the gen table
-  the vectors depend on.
+  compares against them needs a pin with the same derived table; `test_derived_vectors` checks
+  the shape only; `test_derived_core` (features/derived, C3) replays the scenarios through the
+  core, compares every row and fingerprints the gen table the vectors depend on.
 - Provenance: the banner of each file carries the defs version and a content SHA-256; vehicle-server
   keeps the same hashes in `tests/golden/MANIFEST.sha256` and fails its CI when the reference
   changes without regenerating. Regenerate and commit here whenever that manifest changes.
-- Size about 1.3 MB; host tests only, never linked into the firmware.
+- Size about 3.5 MB; host tests only, never linked into the firmware.
 - Class B (C3 part 2a): `derived_vectors_b.h` (ride marker and closed-value row types) and
   `derived_<scenario>_b.h`: the rides table is the epoch-marker table (start_ms opens a stop epoch,
   end_ms ends it and the closed values of that ride are compared), one row per class-B scalar signal
-  (12) with its tolerance. The four single-ride scenarios replay the DID inputs of the class-A header
-  of the same name; `derived_two_rides_b.h` carries its own inputs (two rides and an ECU-absent gap).
-  `test_derived_ride` replays them. No GPS or sensor input.
+  (27 selected; rt-core computes the 12 part-2a accumulators and leaves the 15 D-103 summaries
+  NOT_COMPUTED with `DERIVED_NC_NO_FORMULA` in this run). The four pre-D-103 single-ride scenarios
+  replay the DID inputs of the class-A header of the same name; `derived_two_rides_b.h` carries its
+  own inputs (two rides and an ECU-absent gap). `test_derived_ride` replays those five. The new
+  `derived_start_idle_refuel_b.h` is generated for the new class-A scenario; its 15 new D-103
+  summaries are NOT_COMPUTED (the explicit list in `test_derived_ride`), so it is not added to the
+  class-B replay in this run. No GPS or sensor input.
 - Ride-summary records (C3 part 2b, D-098): `derived_ride_records.h`, vehicle-server's float32
   encoder of the generated layout (`platform_uds_ride_fields[]`): `derived_ride_field_vectors[]`
   (473 generic-writer cases incl. the exact float32 ties 2.5 -> 2 and 3.5 -> 4),

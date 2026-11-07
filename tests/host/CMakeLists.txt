@@ -41,6 +41,8 @@ target_include_directories(test_derived_vectors PRIVATE ${CMAKE_CURRENT_SOURCE_D
 # The derived core (D-070) against the golden vectors and hand-computed values.
 vehicle_host_test(test_derived_core)
 target_include_directories(test_derived_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
+vehicle_host_test(test_derived_d103)
+target_include_directories(test_derived_d103 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
 vehicle_host_test(test_derived_ride)
 target_include_directories(test_derived_ride PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
 vehicle_host_test(test_derived_gear)

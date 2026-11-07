@@ -60,6 +60,16 @@ extern "C" {
 #define DERIVED_WIN_COOLANT_CAP (77u)
 #define DERIVED_WIN_OIL_CAP (14u)
 #define DERIVED_WIN_ACCEL_CAP (8u)
+/* D-103 windows: largest window / poll + 2. ENGINE_SPEED poll 110 ms: idle drift 60 s
+ * = 545 + 2 = 547; BATTERY_VOLTAGE poll 800 ms: charging plateau 10 s = 12 + 2 = 14;
+ * FUEL_LEVEL poll 5000 ms: fuel level filtered 30 s = 6 + 2 = 8; VEHICLE_ACCEL period
+ * 110 ms: the 30 s acceleration history = 272 + 2 = 274. */
+#define DERIVED_WIN_RPM_HIST_CAP (548u)
+#define DERIVED_WIN_BATT_HIST_CAP (15u)
+#define DERIVED_WIN_FUEL_HIST_CAP (8u)
+#define DERIVED_WIN_ACCEL_HIST_CAP (277u)
+_Static_assert(DERIVED_WIN_RPM_HIST_CAP >= ((60u * 1000u) / 110u) + 2u, "idle drift window");
+_Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel filter window");
 
 /*
  * Algorithm parameters and unit conversions ported from the reference
@@ -82,6 +92,9 @@ extern "C" {
 #define DERIVED_PA_PER_KPA (1000.0f)                   /* formulas.py:155 */
 #define DERIVED_PERCENT (100.0f)                       /* formulas.py:342 */
 #define DERIVED_MS_PER_S (1000.0f)                     /* formulas.py:168 */
+#define DERIVED_M3_PER_CM3 (1.0e-6f)                   /* cm3 -> m3, d103_windows.py */
+#define DERIVED_R_AIR_VE (287.05f)                     /* J/(kg K), d103_windows.py */
+#define DERIVED_INTAKE_STROKES_PER_MIN (120.0f)        /* four-stroke: rpm / 120 per second */
 /* SAE J1349 reference conditions of the power correction: algorithm parameters, provisional
  * (D-070 item 6), formulas.py:56-57. */
 #define DERIVED_J1349_REFERENCE_PRESSURE_KPA (99.0f)
@@ -138,22 +151,73 @@ typedef struct {
 } derived_stop_t;
 
 typedef struct {
+    bool shift_has_prev;
+    bool shift_floor_set;
+    uint32_t shift_prev_ms;
+    uint32_t shift_floor_ms;
+    bool launch_active;
+    bool launch_has_prev;
+    bool launch_prev_valid;
+    uint32_t launch_start_ms;
+    uint32_t launch_prev_ms;
+    float launch_prev_kmh;
+    bool braking_active;
+    bool braking_has_prev;
+    uint32_t braking_run_ms;
+    uint32_t braking_prev_ms;
+    uint32_t braking_seq;
+    float braking_peak_mps2;
+    bool refuel_has_moving;
+    bool refuel_rested;
+    bool refuel_fuel_ok;
+    uint32_t refuel_moving_ms;
+    uint32_t refuel_fuel_stamp_ms;
+    float refuel_fuel_pct;
+    bool rest_has_prev;
+    bool rest_zero_valid;
+    uint32_t rest_prev_ms;
+    uint32_t rest_zero_ms;
+    float rest_zero_v;
+    bool crank_has_prev;
+    bool crank_zero_valid;
+    bool crank_active;
+    bool crank_min_ok;
+    bool crank_end_pending;
+    uint32_t crank_prev_ms;
+    uint32_t crank_zero_ms;
+    uint32_t crank_start_ms;
+    uint32_t crank_end_ms;
+    float crank_min_v;
+    bool idle_baseline_ok;
+    uint32_t idle_baseline_end_ms;
+    float idle_baseline_sum;
+    uint32_t idle_baseline_n;
+} derived_d103_state_t;
+
+typedef struct {
     derived_out_t out[VEHICLE_CL250_DERIVED_COUNT];
     derived_sched_t sched[VEHICLE_CL250_DERIVED_COUNT];
     derived_did_t did[VEHICLE_CL250_DID_COUNT];
     derived_integral_t integral[3];
     derived_stop_t stop;
+    derived_d103_state_t d103;
     float baro_ref;  /* first positive barometric sample: the altitude reference */
     bool baro_ref_set;
     uint32_t max_stale_ms; /* longest limit of any computed signal: the lapse bound */
     uint32_t computed_count;
     derived_ride_t ride; /* class-B ride summaries (derived_ride.h) */
-    derived_ring_t ring[5];
+    derived_ring_t ring[9];
     derived_sample_t speed_win[DERIVED_WIN_SPEED_CAP];
     derived_sample_t fuel_rate_win[DERIVED_WIN_FUEL_RATE_CAP];
     derived_sample_t coolant_win[DERIVED_WIN_COOLANT_CAP];
     derived_sample_t oil_win[DERIVED_WIN_OIL_CAP];
     derived_sample_t accel_win[DERIVED_WIN_ACCEL_CAP];
+    derived_sample_t rpm_hist[DERIVED_WIN_RPM_HIST_CAP];
+    uint8_t rpm_warm[DERIVED_WIN_RPM_HIST_CAP];
+    derived_sample_t batt_hist[DERIVED_WIN_BATT_HIST_CAP];
+    derived_sample_t fuel_hist[DERIVED_WIN_FUEL_HIST_CAP];
+    derived_sample_t accel_hist[DERIVED_WIN_ACCEL_HIST_CAP];
+    uint8_t accel_hist_valid[DERIVED_WIN_ACCEL_HIST_CAP];
     uint32_t evals_step; /* formula evaluations (and event/breakpoint updates) in the last step */
     uint32_t evals_max;  /* the largest evals_step so far */
 } derived_core_t;
