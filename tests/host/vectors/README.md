@@ -28,9 +28,12 @@ cd vehicle-server && uv run vehicle-server golden --out ../vehicle-rt-core/tests
   `derived_<scenario>_b.h`: the rides table is the epoch-marker table (start_ms opens a stop epoch,
   end_ms ends it and the closed values of that ride are compared), one row per class-B scalar signal
   (27 selected; rt-core computes the 12 part-2a accumulators and leaves the 15 D-103 summaries
-  NOT_COMPUTED with `DERIVED_NC_NO_FORMULA` in this run). The four single-ride scenarios replay the
-  DID inputs of the class-A header of the same name; `derived_two_rides_b.h` carries its own inputs
-  (two rides and an ECU-absent gap). `test_derived_ride` replays them. No GPS or sensor input.
+  NOT_COMPUTED with `DERIVED_NC_NO_FORMULA` in this run). The four pre-D-103 single-ride scenarios
+  replay the DID inputs of the class-A header of the same name; `derived_two_rides_b.h` carries its
+  own inputs (two rides and an ECU-absent gap). `test_derived_ride` replays those five. The new
+  `derived_start_idle_refuel_b.h` is generated for the new class-A scenario; its 15 new D-103
+  summaries are NOT_COMPUTED (the explicit list in `test_derived_ride`), so it is not added to the
+  class-B replay in this run. No GPS or sensor input.
 - Ride-summary records (C3 part 2b, D-098): `derived_ride_records.h`, vehicle-server's float32
   encoder of the generated layout (`platform_uds_ride_fields[]`): `derived_ride_field_vectors[]`
   (473 generic-writer cases incl. the exact float32 ties 2.5 -> 2 and 3.5 -> 4),
