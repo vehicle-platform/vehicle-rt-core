@@ -18,6 +18,7 @@ add_library(vehicle_rtcore_logic STATIC
     features/cornering/lean_core.c
     features/cornering/lean_tx_core.c
     features/derived/derived_core.c
+    features/derived/derived_d103.c
     features/derived/derived_gear.c
     features/derived/derived_ride.c
 )

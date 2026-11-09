@@ -8,7 +8,9 @@ Derived signals of D-070 (catalog section 5), computed on rt-core. **Part 1 and 
 
 | File | What |
 |---|---|
-| `derived_core.{h,c}` | Pure core (no HAL, RTOS, services, clock): input array in, output table out. Float32, `isfinite` checks, `-fno-math-errno`, refuses `-ffast-math`. |
+| `derived_core.{h,c}` | Pure core (no HAL, RTOS, services, clock): input array in, output table out. Float32, `isfinite` checks, `-fno-math-errno`, refuses `-ffast-math`. Scheduler, rings, output store and the non-D-103 formulas. |
+| `derived_d103.c` | The D-103 class-A formulas, their sample history and the shift/launch/braking/refuel/battery-rest/cranking event state machines, split out of `derived_core.c`. Same purity and float rules (`-ffast-math` refused). |
+| `derived_core_internal.h` | Private interface between `derived_core.c` and `derived_d103.c` (`derived_ctx_t`, ring ids, `derived_core_*` / `derived_d103_*`); only `features/derived` may include it (CI layering grep). |
 | `derived_types.h` | Flags, status, input/output rows, the epoch and the ride selector shared by the core and the ride module. |
 | `derived_ride.{h,c}` | Pure class-B accumulators and closed values (part 2a). |
 | `derived_gear.{h,c}` | Gear estimate from the measured ratio, pure and private to this feature for now; it moves to `services/` when a second feature needs a gear (architecture-guard). |
