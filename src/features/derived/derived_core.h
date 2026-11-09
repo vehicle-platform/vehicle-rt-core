@@ -106,16 +106,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 typedef struct {
     float value;
     uint32_t stamp_ms;
-} derived_sample_t;
-
-typedef struct {
-    uint16_t head;  /* index of the newest sample */
-    uint16_t count;
-} derived_ring_t;
-
-typedef struct {
-    float value;
-    uint32_t stamp_ms;
     uint32_t first_ms; /* stamp of the first sample seen */
     bool present;
     bool seen;
@@ -205,6 +195,7 @@ typedef struct {
     bool baro_ref_set;
     uint32_t max_stale_ms; /* longest limit of any computed signal: the lapse bound */
     uint32_t computed_count;
+    uint32_t win_mask;     /* D-079 windows (bit w) with a computed summary and inputs/sizing that fit */
     derived_ride_t ride; /* class-B ride summaries (derived_ride.h) */
     derived_ring_t ring[9];
     derived_sample_t speed_win[DERIVED_WIN_SPEED_CAP];

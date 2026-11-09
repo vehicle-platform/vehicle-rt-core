@@ -27,6 +27,7 @@
 #include "features/derived/derived_gear.h"
 #include "vectors/derived_accel_gears.h"
 #include "vectors/derived_edge_values.h"
+#include "vectors/derived_health_windows.h"
 #include "vectors/derived_idle_warmup.h"
 #include "vectors/derived_stale_gap.h"
 #include "vectors/derived_start_idle_refuel.h"
@@ -56,6 +57,8 @@ _Static_assert((int)DERIVED_FLAG_ENGINE_OFF == (int)DERIVED_VECTOR_FLAG_ENGINE_O
 _Static_assert((int)DERIVED_FLAG_NOT_MOVING == (int)DERIVED_VECTOR_FLAG_NOT_MOVING, "flag");
 _Static_assert((int)DERIVED_FLAG_NO_GEAR == (int)DERIVED_VECTOR_FLAG_NO_GEAR, "flag");
 _Static_assert((int)DERIVED_FLAG_NOT_APPLICABLE == (int)DERIVED_VECTOR_FLAG_NOT_APPLICABLE, "flag");
+_Static_assert((int)DERIVED_FLAG_NO_DATA == (int)DERIVED_VECTOR_FLAG_NO_DATA, "flag");
+_Static_assert((int)DERIVED_FLAG_NO_WINDOW == (int)DERIVED_VECTOR_FLAG_NO_WINDOW, "flag");
 
 typedef struct {
     const char* name;
@@ -78,6 +81,7 @@ static const scenario_t scenarios[] = {
     SCENARIO(derived_stale_gap, DERIVED_STALE_GAP),
     SCENARIO(derived_start_idle_refuel, DERIVED_START_IDLE_REFUEL),
     SCENARIO(derived_edge_values, DERIVED_EDGE_VALUES),
+    SCENARIO(derived_health_windows, DERIVED_HEALTH_WINDOWS),
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
 

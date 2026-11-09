@@ -926,6 +926,8 @@ void derived_core_store(derived_core_t* c, uint32_t sig, uint32_t stamp, derived
     if (c->ride.open) {
         /* every row: the ride's last-valid / count / max / first and the flag times */
         derived_ride_class_a(&c->ride.acc, sig, stamp, f == DERIVED_FLAG_NONE, value);
+        /* a derived window input (W4's gear estimate): the row, valid or not */
+        derived_windows_push_derived(&c->ride.acc.win, sig, f == DERIVED_FLAG_NONE, value, stamp);
     }
 }
 
@@ -1008,6 +1010,7 @@ static void ingest(derived_core_t* c, uint32_t now, const derived_in_t* in)
                 record_sample(c, i, in[i].value, in[i].stamp_ms);
                 if (c->ride.open) {
                     derived_ride_sample(&c->ride.acc, i, in[i].value, in[i].stamp_ms);
+                    derived_windows_push_did(&c->ride.acc.win, i, in[i].value, in[i].stamp_ms);
                 }
             }
             const uint32_t a = now - d->stamp_ms;
@@ -1132,11 +1135,13 @@ static void epoch_step(derived_core_t* c, uint32_t now, const derived_epoch_t* e
     r->last_now_ms = now;
     if ((e != NULL) && e->known) {
         if (r->open && ((!e->open) || (e->counter != r->counter))) {
+            derived_windows_end(&r->acc.win); /* the last window point, an open instance closes there */
             derived_ride_close(r, now);
         }
         if ((!r->open) && e->open) {
             reset_class_a(c);
             derived_ride_begin(r, e->counter);
+            derived_windows_begin(&r->acc.win, c->win_mask, c->rpm_hist, &c->ring[RING_RPM_HIST], DERIVED_WIN_RPM_HIST_CAP);
         }
     }
 }
@@ -1228,6 +1233,9 @@ void derived_core_step_epoch(derived_core_t* c, uint32_t now_ms, const derived_i
         if (c->sched[sig].computed && (kind_of(sig) == KIND_EVENT)) {
             event_step(c, sig);
         }
+    }
+    if (c->ride.open) {
+        derived_windows_run(&c->ride.acc.win); /* D-079 windows: this step's samples, in time order */
     }
     ride_confirm_rows(c);
     if (c->evals_step > c->evals_max) {
@@ -1333,6 +1341,25 @@ static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
         if ((r == DERIVED_NC_NONE) && (!sizing_ok(sig))) {
             r = DERIVED_NC_SIZING;
         }
+        const uint32_t win = ride ? derived_windows_of_signal(sig) : DERIVED_WINDOWS_NONE;
+        if ((r == DERIVED_NC_NONE) && (win != DERIVED_WINDOWS_NONE)) {
+            /* a D-079 window summary also needs the window's own inputs (a derived channel that
+             * is not computed, a sensor) and its sample buffers */
+            uint8_t chans[DERIVED_WINDOWS_CH_MAX];
+            const uint32_t n = derived_windows_derived_inputs(win, chans);
+            if (n > DERIVED_WINDOWS_CH_MAX) {
+                r = DERIVED_NC_INPUT;
+            } else {
+                for (uint32_t k = 0u; k < n; k++) {
+                    if ((chans[k] >= sig) || (!c->sched[chans[k]].computed)) {
+                        r = DERIVED_NC_INPUT;
+                    }
+                }
+            }
+            if ((r == DERIVED_NC_NONE) && (!derived_windows_sizing_ok(win, DERIVED_WIN_RPM_HIST_CAP))) {
+                r = DERIVED_NC_SIZING;
+            }
+        }
     }
     return r;
 }
@@ -1356,6 +1383,12 @@ void derived_core_init(derived_core_t* c)
             if ((uint32_t)vehicle_cl250_derived[sig].stale_after_ms > max_stale) {
                 max_stale = vehicle_cl250_derived[sig].stale_after_ms;
             }
+        }
+    }
+    for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
+        const uint32_t win = derived_windows_of_signal(sig);
+        if (c->sched[sig].computed && (win != DERIVED_WINDOWS_NONE)) {
+            c->win_mask |= (1u << win);
         }
     }
     /* the DIDs' own limits (every DID input, events included, D-087) */

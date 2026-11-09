@@ -9,6 +9,7 @@
  */
 #include "vectors/derived_accel_gears.h"
 #include "vectors/derived_edge_values.h"
+#include "vectors/derived_health_windows.h"
 #include "vectors/derived_idle_warmup.h"
 #include "vectors/derived_start_idle_refuel.h"
 #include "vectors/derived_stale_gap.h"
@@ -48,7 +49,7 @@ static void check_outputs(const derived_vector_output_t* out, uint32_t n,
     TEST_ASSERT_TRUE(n > 0u);
     for (uint32_t i = 0u; i < n; i++) {
         TEST_ASSERT_TRUE(out[i].signal < VEHICLE_CL250_DERIVED_COUNT);
-        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_NO_FAN_STEP);
+        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_NO_WINDOW);
         TEST_ASSERT_TRUE(isfinite(out[i].value));
         TEST_ASSERT_TRUE(has_tol(tol, n_tol, out[i].signal));
         if (out[i].valid) {
@@ -101,6 +102,11 @@ static void test_start_idle_refuel_is_well_formed(void)
     CHECK_SCENARIO(derived_start_idle_refuel, DERIVED_START_IDLE_REFUEL);
 }
 
+static void test_health_windows_is_well_formed(void)
+{
+    CHECK_SCENARIO(derived_health_windows, DERIVED_HEALTH_WINDOWS);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -109,5 +115,6 @@ int main(void)
     RUN_TEST(test_stale_gap_is_well_formed);
     RUN_TEST(test_edge_values_is_well_formed);
     RUN_TEST(test_start_idle_refuel_is_well_formed);
+    RUN_TEST(test_health_windows_is_well_formed);
     return UNITY_END();
 }

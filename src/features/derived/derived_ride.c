@@ -36,6 +36,16 @@ static const uint16_t slot_signal[DERIVED_RIDE_SLOTS] = {
     VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT,       VEHICLE_CL250_DERIVED_RIDE_LAUNCH_COUNT,
     VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME,       VEHICLE_CL250_DERIVED_RIDE_THERMAL_CYCLE_COUNT,
     VEHICLE_CL250_DERIVED_RIDE_FAN_ON_TEMPERATURE,
+    /* the 17 D-079 window summaries */
+    VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_REST_VOLTAGE,       VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_SENSOR_SPREAD,
+    VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_MAP_BARO_DELTA,     VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_WARM_RESTART,
+    VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_COUNT,              VEHICLE_CL250_DERIVED_WINDOW_CRANK_COUNT,
+    VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_RPM_SPREAD,      VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_RPM_DRIFT,
+    VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_MAP_SPREAD,      VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_STFT_MEAN,
+    VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_STFT_STD,        VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_COUNT,
+    VEHICLE_CL250_DERIVED_WINDOW_CRUISE_COUNT,              VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_TAU,
+    VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_START,   VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_END,
+    VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COUNT,
 };
 
 uint32_t derived_ride_slot(uint32_t sig)
@@ -652,9 +662,26 @@ static raw_t raw_simple(const derived_ride_acc_t* a, uint32_t sig)
     return r;
 }
 
+/* A D-079 window summary: counts are always a value, the rest is invalid without a qualifying
+ * instance (NO_WINDOW) or without samples (NO_DATA, INSUFFICIENT_SAMPLES). */
+static raw_t window_raw(const derived_ride_acc_t* a, uint32_t sig)
+{
+    double v = 0.0;
+    const derived_flag_t f = derived_windows_value(&a->win, sig, &v);
+    return (f == DERIVED_FLAG_NONE) ? raw_value(v) : raw_flag(f);
+}
+
 static raw_t raw_of(const derived_ride_acc_t* a, uint32_t sig)
 {
-    return (sig == VEHICLE_CL250_DERIVED_RIDE_FUEL_CONSUMPTION) ? consumption(a) : raw_simple(a, sig);
+    raw_t r;
+    if (sig == VEHICLE_CL250_DERIVED_RIDE_FUEL_CONSUMPTION) {
+        r = consumption(a);
+    } else if (derived_windows_has_summary(sig)) {
+        r = window_raw(a, sig);
+    } else {
+        r = raw_simple(a, sig);
+    }
+    return r;
 }
 
 void derived_ride_finalize(const derived_ride_acc_t* a, uint32_t sig, derived_out_t* out)

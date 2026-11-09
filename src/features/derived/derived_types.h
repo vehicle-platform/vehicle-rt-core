@@ -31,9 +31,11 @@ typedef enum {
     DERIVED_FLAG_NOT_MOVING = 11,
     DERIVED_FLAG_NO_GEAR = 12,
     DERIVED_FLAG_NOT_APPLICABLE = 13,
+    DERIVED_FLAG_NO_DATA = 14,     /* a class-B summary over an empty sample set (the vector flag numbering) */
     DERIVED_FLAG_STARTS_WARM = 16, /* ride_warmup_time: the coolant was warm at the start (the vector flag numbering) */
     DERIVED_FLAG_NEVER_WARM = 17,  /* ride_warmup_time: the coolant never reached the operating temperature */
-    DERIVED_FLAG_NO_FAN_STEP = 19  /* ride_fan_on_temperature: no qualifying battery drop */
+    DERIVED_FLAG_NO_FAN_STEP = 19, /* ride_fan_on_temperature: no qualifying battery drop */
+    DERIVED_FLAG_NO_WINDOW = 20    /* a D-079 window summary: the ride has no qualifying instance */
 } derived_flag_t;
 
 typedef enum {
@@ -55,6 +57,17 @@ typedef enum {
     DERIVED_NC_GEN,      /* the gen/ entry is inconsistent (no period, no window) */
     DERIVED_NC_UNBOUNDED /* needs the whole ride's samples: not bounded on the MCU */
 } derived_nc_reason_t;
+
+/* A sample of a history ring (value and its stamp), and the ring's head/count. */
+typedef struct {
+    float value;
+    uint32_t stamp_ms;
+} derived_sample_t;
+
+typedef struct {
+    uint16_t head; /* index of the newest sample */
+    uint16_t count;
+} derived_ring_t;
 
 /* One DID sample as the glue hands it in (services/vehicle_signals through the snapshot). */
 typedef struct {
