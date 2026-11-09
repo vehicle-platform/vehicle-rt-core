@@ -14,10 +14,13 @@
  * ride_end_coolant_temp, and the 13 D-103 summaries (LR21b): ride_heat_soak_max,
  * ride_cranking_dip, ride_rest_voltage, ride_cold_abuse_time, ride_over_rev_time,
  * ride_lugging_time, ride_idle_rpm_std, ride_idle_rpm_drift, ride_shift_count,
- * ride_launch_count, ride_warmup_time, ride_thermal_cycle_count, ride_fan_on_temperature.
+ * ride_launch_count, ride_warmup_time, ride_thermal_cycle_count, ride_fan_on_temperature,
+ * and the 17 D-079 window summaries (derived_windows.h): the statistics of the first qualifying
+ * instance of W1..W5 and the qualifying counts (window_key_on_*, window_crank_count,
+ * window_warm_idle_*, window_cruise_count, window_post_stop_*).
  * ride_aggressiveness_score and throttle_torque_lag need every sample of the ride (a p95 and a
  * median over every step): NOT_COMPUTED, DERIVED_NC_UNBOUNDED. Binned, per-gear, sensor-input,
- * window-record (W1-W5) and the other class-B signals are NOT_COMPUTED with a reason.
+ * the 12 window signals the reference does not compute and the other class-B signals are NOT_COMPUTED with a reason.
  *
  * The state is a handful of scalars for the open ride plus one closed record (the previous
  * ride) with one output row per computed signal: no heap, no unbounded loop. The time
@@ -33,6 +36,7 @@
  */
 
 #include "features/derived/derived_types.h"
+#include "features/derived/derived_windows.h"
 #include "vehicle_cl250_derived.h"
 
 #include <stdbool.h>
@@ -42,7 +46,7 @@
 extern "C" {
 #endif
 
-#define DERIVED_RIDE_SLOTS (25u)
+#define DERIVED_RIDE_SLOTS (42u)
 #define DERIVED_RIDE_FLAG_TIMES (3u) /* cold abuse, over rev, lugging */
 /* Grid class-A outputs whose rows wait for the reference's grid end (see derived_ride_advance). */
 #define DERIVED_RIDE_TAILS (6u)
@@ -161,6 +165,8 @@ typedef struct {
     bool batt_pending;
     float fan_temp;
     bool fan_found;
+    /* D-079 health windows (W1-W5) and the statistics of the 17 window summaries */
+    derived_windows_t win;
 } derived_ride_acc_t;
 
 typedef struct {

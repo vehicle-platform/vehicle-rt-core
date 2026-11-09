@@ -19,6 +19,8 @@
 #include "vectors/derived_accel_gears_b.h"
 #include "vectors/derived_edge_values.h"
 #include "vectors/derived_edge_values_b.h"
+#include "vectors/derived_health_windows.h"
+#include "vectors/derived_health_windows_b.h"
 #include "vectors/derived_idle_warmup.h"
 #include "vectors/derived_idle_warmup_b.h"
 #include "vectors/derived_stale_gap.h"
@@ -58,6 +60,7 @@ static const bscenario_t scenarios[] = {
     BSCENARIO(derived_stale_gap, DERIVED_STALE_GAP, derived_stale_gap_inputs, DERIVED_STALE_GAP_INPUT_COUNT),
     BSCENARIO(derived_edge_values, DERIVED_EDGE_VALUES, derived_edge_values_inputs, DERIVED_EDGE_VALUES_INPUT_COUNT),
     BSCENARIO(derived_two_rides, DERIVED_TWO_RIDES, derived_two_rides_b_inputs, DERIVED_TWO_RIDES_B_INPUT_COUNT),
+    BSCENARIO(derived_health_windows, DERIVED_HEALTH_WINDOWS, derived_health_windows_inputs, DERIVED_HEALTH_WINDOWS_INPUT_COUNT),
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
 
@@ -92,6 +95,8 @@ static void touch_unused_class_a_vectors(void)
     (void)sizeof(derived_stale_gap_tol);
     (void)sizeof(derived_edge_values_outputs);
     (void)sizeof(derived_edge_values_tol);
+    (void)sizeof(derived_health_windows_outputs);
+    (void)sizeof(derived_health_windows_tol);
 }
 
 static derived_core_t core;
@@ -378,7 +383,7 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
     printf("computed set (class B): %u computed, %u in the golden vectors, %u differences\n",
            (unsigned)class_b_computed, (unsigned)n_golden, (unsigned)differences);
     TEST_ASSERT_EQUAL_UINT32(0u, differences);
-    TEST_ASSERT_EQUAL_UINT32(27u, n_golden);
+    TEST_ASSERT_EQUAL_UINT32(44u, n_golden); /* 42 computed + the 2 unbounded */
     TEST_ASSERT_EQUAL_UINT32(DERIVED_RIDE_SLOTS, class_b_computed);
     TEST_ASSERT_EQUAL_UINT32(2u, (uint32_t)(sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED / sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED[0]));
 }
@@ -391,8 +396,8 @@ static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_ELEMENTS, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_FINAL_DRIVE_RATIO));
     const uint32_t others[] = {VEHICLE_CL250_DERIVED_RIDE_DISTANCE_GPS, VEHICLE_CL250_DERIVED_RIDE_BUS_OFF_COUNT,
                                VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
-                               VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_REST_VOLTAGE,
-                               VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_TAU,
+                               VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_PUMP_PEAK_CURRENT,
+                               VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL,
                                VEHICLE_CL250_DERIVED_SPEEDOMETER_ERROR};
     for (uint32_t i = 0u; i < (sizeof others / sizeof others[0]); i++) {
         TEST_ASSERT_FALSE(derived_core_is_computed(&core, others[i]));
