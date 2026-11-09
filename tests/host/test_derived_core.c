@@ -29,6 +29,7 @@
 #include "vectors/derived_edge_values.h"
 #include "vectors/derived_idle_warmup.h"
 #include "vectors/derived_stale_gap.h"
+#include "vectors/derived_start_idle_refuel.h"
 #include "vehicle_cl250_constants.h"
 
 #include <math.h>
@@ -52,6 +53,9 @@ _Static_assert((int)DERIVED_FLAG_STRAIGHT_LINE == (int)DERIVED_VECTOR_FLAG_STRAI
 _Static_assert((int)DERIVED_FLAG_NO_CONSUMPTION == (int)DERIVED_VECTOR_FLAG_NO_CONSUMPTION, "flag");
 _Static_assert((int)DERIVED_FLAG_NO_POWER == (int)DERIVED_VECTOR_FLAG_NO_POWER, "flag");
 _Static_assert((int)DERIVED_FLAG_ENGINE_OFF == (int)DERIVED_VECTOR_FLAG_ENGINE_OFF, "flag");
+_Static_assert((int)DERIVED_FLAG_NOT_MOVING == (int)DERIVED_VECTOR_FLAG_NOT_MOVING, "flag");
+_Static_assert((int)DERIVED_FLAG_NO_GEAR == (int)DERIVED_VECTOR_FLAG_NO_GEAR, "flag");
+_Static_assert((int)DERIVED_FLAG_NOT_APPLICABLE == (int)DERIVED_VECTOR_FLAG_NOT_APPLICABLE, "flag");
 
 typedef struct {
     const char* name;
@@ -72,6 +76,7 @@ static const scenario_t scenarios[] = {
     SCENARIO(derived_idle_warmup, DERIVED_IDLE_WARMUP),
     SCENARIO(derived_accel_gears, DERIVED_ACCEL_GEARS),
     SCENARIO(derived_stale_gap, DERIVED_STALE_GAP),
+    SCENARIO(derived_start_idle_refuel, DERIVED_START_IDLE_REFUEL),
     SCENARIO(derived_edge_values, DERIVED_EDGE_VALUES),
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
@@ -382,7 +387,7 @@ static void test_computed_set_equals_the_golden_set(void)
     printf("computed set (class A): %u computed, %u in the golden vectors, %u differences\n",
            (unsigned)class_a_computed, (unsigned)n_golden, (unsigned)differences);
     TEST_ASSERT_EQUAL_UINT32(0u, differences);
-    TEST_ASSERT_EQUAL_UINT32(28u, n_golden);
+    TEST_ASSERT_EQUAL_UINT32(49u, n_golden);
     TEST_ASSERT_EQUAL_UINT32(n_golden, class_a_computed);
 }
 
@@ -517,7 +522,7 @@ static uint32_t gen_fingerprint(void)
     return fnv(h, constants, sizeof constants);
 }
 
-#define GEN_FINGERPRINT (0xC4A62B59u)
+#define GEN_FINGERPRINT (0x4184CA10u)
 
 static void test_vectors_match_the_pinned_gen_table(void)
 {
@@ -923,7 +928,7 @@ static void test_coarse_stepping_stays_on_the_reference_grid(void)
             const derived_out_t* const o = out(s);
             if (o->seq != prev[s]) {
                 evaluated++;
-                if (s != VEHICLE_CL250_DERIVED_STOP_EVENT) {
+                if (!vehicle_cl250_derived[s].event) {
                     /* every input starts at 0, so every grid starts at 0 */
                     TEST_ASSERT_EQUAL_UINT32(0u, o->stamp_ms % vehicle_cl250_derived[s].period_ms);
                     TEST_ASSERT_TRUE((t - o->stamp_ms) < 7u);

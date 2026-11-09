@@ -12,12 +12,36 @@
 /* The table lists the six gen/ ratios; a gearbox with another gear count must extend it. */
 _Static_assert(VEHICLE_CL250_GEAR_COUNT == 6u, "gear table covers exactly the gen/ gear count");
 
+static const float gear_ratio[VEHICLE_CL250_GEAR_COUNT] = {
+    VEHICLE_CL250_GEAR_RATIO_1, VEHICLE_CL250_GEAR_RATIO_2, VEHICLE_CL250_GEAR_RATIO_3,
+    VEHICLE_CL250_GEAR_RATIO_4, VEHICLE_CL250_GEAR_RATIO_5, VEHICLE_CL250_GEAR_RATIO_6,
+};
+
+float derived_gear_ratio(uint8_t gear)
+{
+    float ratio = 0.0f;
+    if ((gear >= 1u) && (gear <= (uint8_t)VEHICLE_CL250_GEAR_COUNT)) {
+        ratio = gear_ratio[gear - 1u];
+    }
+    return ratio;
+}
+
+float derived_gear_nearest_ratio(float measured_ratio)
+{
+    float nearest = gear_ratio[0];
+    float best = fabsf((measured_ratio / nearest) - 1.0f);
+    for (uint8_t i = 1u; i < (uint8_t)VEHICLE_CL250_GEAR_COUNT; i++) {
+        const float dist = fabsf((measured_ratio / gear_ratio[i]) - 1.0f);
+        if (dist < best) {
+            best = dist;
+            nearest = gear_ratio[i];
+        }
+    }
+    return nearest;
+}
+
 uint8_t derived_gear_estimate(float measured_ratio)
 {
-    static const float gear_ratio[VEHICLE_CL250_GEAR_COUNT] = {
-        VEHICLE_CL250_GEAR_RATIO_1, VEHICLE_CL250_GEAR_RATIO_2, VEHICLE_CL250_GEAR_RATIO_3,
-        VEHICLE_CL250_GEAR_RATIO_4, VEHICLE_CL250_GEAR_RATIO_5, VEHICLE_CL250_GEAR_RATIO_6,
-    };
     uint8_t gear = 0u;
     if ((isfinite(measured_ratio) != 0) && (measured_ratio > 0.0f)) {
         float best = 0.0f;

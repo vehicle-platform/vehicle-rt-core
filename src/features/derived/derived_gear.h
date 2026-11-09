@@ -24,6 +24,13 @@ extern "C" {
  * or the ratio is not a finite positive number. */
 uint8_t derived_gear_estimate(float measured_ratio);
 
+/* The gen/ ratio of gear 1..VEHICLE_CL250_GEAR_COUNT, or 0 for any other gear. */
+float derived_gear_ratio(uint8_t gear);
+
+/* The gen/ gear ratio nearest to `measured_ratio` (relative distance, the lower gear on a
+ * tie), with no tolerance: the D-103 clutch rule compares the measured ratio with it. */
+float derived_gear_nearest_ratio(float measured_ratio);
+
 #ifdef __cplusplus
 }
 #endif

@@ -27,7 +27,10 @@ typedef enum {
     DERIVED_FLAG_STRAIGHT_LINE = 7, /* sensor-input signals only: not computed in part 1 */
     DERIVED_FLAG_NO_CONSUMPTION = 8,
     DERIVED_FLAG_NO_POWER = 9,
-    DERIVED_FLAG_ENGINE_OFF = 10
+    DERIVED_FLAG_ENGINE_OFF = 10,
+    DERIVED_FLAG_NOT_MOVING = 11,
+    DERIVED_FLAG_NO_GEAR = 12,
+    DERIVED_FLAG_NOT_APPLICABLE = 13
 } derived_flag_t;
 
 typedef enum {

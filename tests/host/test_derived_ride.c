@@ -61,6 +61,38 @@ static const bscenario_t scenarios[] = {
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
 
+/* Defs v0.24.0 selects the class-B summaries over the new D-103 signals too. This run is
+ * class-A only, so these are NOT_COMPUTED with DERIVED_NC_NO_FORMULA; the golden replay
+ * asserts that exact set instead of silently skipping it. When a class-B formula lands,
+ * remove its entry here and lower the expected NOT_COMPUTED count in the same commit. */
+static const uint16_t D103_CLASS_B_NOT_COMPUTED[] = {
+    VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX,
+    VEHICLE_CL250_DERIVED_RIDE_THERMAL_CYCLE_COUNT,
+    VEHICLE_CL250_DERIVED_RIDE_FAN_ON_TEMPERATURE,
+    VEHICLE_CL250_DERIVED_RIDE_CRANKING_DIP,
+    VEHICLE_CL250_DERIVED_RIDE_REST_VOLTAGE,
+    VEHICLE_CL250_DERIVED_RIDE_COLD_ABUSE_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_OVER_REV_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_LUGGING_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_STD,
+    VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_DRIFT,
+    VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
+    VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT,
+    VEHICLE_CL250_DERIVED_RIDE_LAUNCH_COUNT,
+    VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE,
+};
+
+static bool is_d103_class_b_not_computed(uint32_t sig)
+{
+    for (uint32_t i = 0u; i < (uint32_t)(sizeof D103_CLASS_B_NOT_COMPUTED / sizeof D103_CLASS_B_NOT_COMPUTED[0]); i++) {
+        if (D103_CLASS_B_NOT_COMPUTED[i] == sig) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* The class-A rows and tolerances of the A headers are not used here (their inputs are). */
 static void touch_unused_class_a_vectors(void)
 {
@@ -154,6 +186,11 @@ static void compare_ride(const bscenario_t* sc, uint16_t ride)
         if (e->ride != ride) {
             continue;
         }
+        if (is_d103_class_b_not_computed(e->signal)) {
+            TEST_ASSERT_FALSE(derived_core_is_computed(&core, e->signal));
+            TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, e->signal));
+            continue;
+        }
         derived_out_t o;
         TEST_ASSERT_TRUE(derived_core_ride_out(&core, DERIVED_RIDE_PREVIOUS, e->signal, &o));
         const float tol = tol_of(sc, e->signal);
@@ -229,6 +266,11 @@ static void compare_records(const bscenario_t* sc, uint16_t ride)
         for (uint32_t i = 0u; i < PLATFORM_UDS_RIDE_FIELD_COUNT; i++) {
             const platform_uds_ride_field_t* const f = &platform_uds_ride_fields[i];
             if (f->did_idx != idx) {
+                continue;
+            }
+            if (is_d103_class_b_not_computed(f->signal)) {
+                TEST_ASSERT_FALSE(derived_core_is_computed(&core, f->signal));
+                TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, f->signal));
                 continue;
             }
             const uint32_t want = be_get(&e->bytes[f->byte], f->length);
@@ -333,6 +375,12 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
             continue;
         }
         class_b_computed += derived_core_is_computed(&core, s) ? 1u : 0u;
+        if (is_d103_class_b_not_computed(s)) {
+            TEST_ASSERT_TRUE(golden[s]);
+            TEST_ASSERT_FALSE(derived_core_is_computed(&core, s));
+            TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, s));
+            continue;
+        }
         if (golden[s] != derived_core_is_computed(&core, s)) {
             fprintf(stderr, "class B signal %u: golden %d, computed %d (reason %d)\n", (unsigned)s, (int)golden[s],
                     (int)derived_core_is_computed(&core, s), (int)derived_core_reason(&core, s));
@@ -342,9 +390,9 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
     printf("computed set (class B): %u computed, %u in the golden vectors, %u differences\n",
            (unsigned)class_b_computed, (unsigned)n_golden, (unsigned)differences);
     TEST_ASSERT_EQUAL_UINT32(0u, differences);
-    TEST_ASSERT_EQUAL_UINT32(12u, n_golden);
-    TEST_ASSERT_EQUAL_UINT32(n_golden, class_b_computed);
+    TEST_ASSERT_EQUAL_UINT32(27u, n_golden);
     TEST_ASSERT_EQUAL_UINT32(DERIVED_RIDE_SLOTS, class_b_computed);
+    TEST_ASSERT_EQUAL_UINT32(15u, (uint32_t)(sizeof D103_CLASS_B_NOT_COMPUTED / sizeof D103_CLASS_B_NOT_COMPUTED[0]));
 }
 
 static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
