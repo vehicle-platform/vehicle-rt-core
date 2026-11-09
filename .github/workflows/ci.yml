@@ -132,7 +132,7 @@ jobs:
           # features/derived itself and the host program may include its headers (any include
           # form); the comms pass reaches the derived task through services/derived_inputs, and
           # that service has one consumer call site, the derived glue.
-          if grep -rnE --include='*.c' --include='*.h' '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^">]*/)?derived(_core|_gear)?\.h' src \
+          if grep -rnE --include='*.c' --include='*.h' '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]([^">]*/)?derived(_core|_core_internal|_gear)?\.h' src \
               | grep -vE '^src/(features/derived|app/host)/'; then
             echo "::error::only src/features/derived and src/app/host may include the derived headers"
             exit 1
