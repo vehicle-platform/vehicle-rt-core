@@ -63,7 +63,8 @@ static const bscenario_t scenarios[] = {
 
 /* Defs v0.24.0 selects the class-B summaries over the new D-103 signals too. This run is
  * class-A only, so these are NOT_COMPUTED with DERIVED_NC_NO_FORMULA; the golden replay
- * asserts that exact set instead of silently skipping it. */
+ * asserts that exact set instead of silently skipping it. When a class-B formula lands,
+ * remove its entry here and lower the expected NOT_COMPUTED count in the same commit. */
 static const uint16_t D103_CLASS_B_NOT_COMPUTED[] = {
     VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME,
     VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX,

@@ -745,32 +745,6 @@ static derived_flag_t f_temp_rate(const ctx_t* x, uint32_t did, float* out)
 #define D103_NEUTRAL_NEUTRAL (1.0f)
 #define D103_NEUTRAL_COASTING (2.0f)
 
-static float gear_ratio_of(uint32_t gear)
-{
-    float ratio = 0.0f;
-    switch (gear) {
-    case 1u:
-        ratio = VEHICLE_CL250_GEAR_RATIO_1;
-        break;
-    case 2u:
-        ratio = VEHICLE_CL250_GEAR_RATIO_2;
-        break;
-    case 3u:
-        ratio = VEHICLE_CL250_GEAR_RATIO_3;
-        break;
-    case 4u:
-        ratio = VEHICLE_CL250_GEAR_RATIO_4;
-        break;
-    case 5u:
-        ratio = VEHICLE_CL250_GEAR_RATIO_5;
-        break;
-    default:
-        ratio = VEHICLE_CL250_GEAR_RATIO_6;
-        break;
-    }
-    return ratio;
-}
-
 static derived_flag_t require_moving(const ctx_t* x, float* speed)
 {
     derived_flag_t f = did_value(x, (uint32_t)VEHICLE_CL250_IDX_VEHICLE_SPEED, speed);
@@ -797,16 +771,7 @@ static derived_flag_t f_clutch_state(const ctx_t* x, float* out)
             f = derived_value(x, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED, &measured);
         }
         if (f == DERIVED_FLAG_NONE) {
-            float nearest = gear_ratio_of(1u);
-            float best = fabsf((measured / nearest) - 1.0f);
-            for (uint32_t gear = 2u; gear <= 6u; gear++) {
-                const float ratio = gear_ratio_of(gear);
-                const float distance = fabsf((measured / ratio) - 1.0f);
-                if (distance < best) {
-                    best = distance;
-                    nearest = ratio;
-                }
-            }
+            const float nearest = derived_gear_nearest_ratio(measured);
             const float relative = (measured / nearest) - 1.0f;
             if (fabsf(relative) <= VEHICLE_CL250_DERIVED_GEAR_RATIO_TOLERANCE) {
                 *out = D103_CLUTCH_ENGAGED;
@@ -837,7 +802,7 @@ static derived_flag_t f_clutch_slip_ratio(const ctx_t* x, float* out)
             float measured = 0.0f;
             f = derived_value(x, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED, &measured);
             if (f == DERIVED_FLAG_NONE) {
-                *out = measured / gear_ratio_of((uint32_t)gear_value);
+                *out = measured / derived_gear_ratio((uint8_t)gear_value);
             }
         }
     }

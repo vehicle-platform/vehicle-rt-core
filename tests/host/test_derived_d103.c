@@ -69,7 +69,8 @@ static void invalid(uint32_t sig, derived_flag_t flag)
 static float rpm_for_ratio(float speed_kmh, float ratio)
 {
     const float wheel_rpm =
-        ((speed_kmh / 3.6f) / (2.0f * 3.14159265f * VEHICLE_CL250_REAR_WHEEL_RADIUS_DYNAMIC_M)) * 60.0f;
+        ((speed_kmh * DERIVED_KMH_TO_MPS) / (2.0f * DERIVED_PI * VEHICLE_CL250_REAR_WHEEL_RADIUS_DYNAMIC_M)) *
+        DERIVED_SECONDS_PER_MINUTE;
     return ratio * wheel_rpm * VEHICLE_CL250_PRIMARY_REDUCTION_RATIO * VEHICLE_CL250_SECONDARY_REDUCTION_RATIO;
 }
 
@@ -94,18 +95,23 @@ static void test_clutch_and_gear_states(void)
     valid(VEHICLE_CL250_DERIVED_CLUTCH_SLIP_RATIO, 1.0f, 1.0e-4f);
     valid(VEHICLE_CL250_DERIVED_NEUTRAL_COASTING_STATE, 0.0f, 0.0f);
 
-    /* ratio 2.6 is 15.5 % above 2nd and above the load minimum: slipping. */
+    /* twice the tolerance above 2nd (nearest gear) with throttle above the load minimum:
+     * slipping, and outside the gear-match band, so no gear. */
     touch_all(110u);
-    put(VEHICLE_CL250_IDX_ENGINE_SPEED, rpm_for_ratio(60.0f, 2.4f), 110u);
+    put(VEHICLE_CL250_IDX_ENGINE_SPEED,
+        rpm_for_ratio(60.0f, VEHICLE_CL250_GEAR_RATIO_2 * (1.0f + (2.0f * VEHICLE_CL250_DERIVED_GEAR_RATIO_TOLERANCE))),
+        110u);
     step(110u);
     valid(VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, 0.0f, 0.0f);
     valid(VEHICLE_CL250_DERIVED_CLUTCH_STATE, 2.0f, 0.0f);
     invalid(VEHICLE_CL250_DERIVED_CLUTCH_SLIP_RATIO, DERIVED_FLAG_NO_GEAR);
     valid(VEHICLE_CL250_DERIVED_NEUTRAL_COASTING_STATE, 1.0f, 0.0f);
 
-    /* ratio 2.8 is outside the tolerance band of every gear, so there is no gear. */
+    /* twice the tolerance below 1st (nearest gear): disengaged, and no gear. */
     touch_all(220u);
-    put(VEHICLE_CL250_IDX_ENGINE_SPEED, rpm_for_ratio(60.0f, 2.8f), 220u);
+    put(VEHICLE_CL250_IDX_ENGINE_SPEED,
+        rpm_for_ratio(60.0f, VEHICLE_CL250_GEAR_RATIO_1 * (1.0f - (2.0f * VEHICLE_CL250_DERIVED_GEAR_RATIO_TOLERANCE))),
+        220u);
     step(220u);
     valid(VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, 0.0f, 0.0f);
     valid(VEHICLE_CL250_DERIVED_CLUTCH_STATE, 1.0f, 0.0f);
@@ -166,7 +172,11 @@ static void test_engine_flags_and_residuals(void)
     put(VEHICLE_CL250_IDX_ENGINE_SPEED, 3000.0f, 0u);
     put(VEHICLE_CL250_IDX_INTAKE_MAP, 100.0f, 0u);
     put(VEHICLE_CL250_IDX_INTAKE_AIR_TEMP, 25.0f, 0u);
-    put(VEHICLE_CL250_IDX_MAF_RATE, 7.276743f, 0u);
+    /* full-cylinder flow, g/s: rho = p / (R T), times displacement and rpm / 120 (four-stroke). */
+    const float rho = (100.0f * DERIVED_PA_PER_KPA) / (DERIVED_R_AIR_VE * (25.0f + DERIVED_KELVIN_OFFSET));
+    const float theoretical_gps = rho * ((float)VEHICLE_CL250_ENGINE_DISPLACEMENT_CM3 * DERIVED_M3_PER_CM3) *
+                                  (3000.0f / DERIVED_INTAKE_STROKES_PER_MIN) * DERIVED_G_PER_KG;
+    put(VEHICLE_CL250_IDX_MAF_RATE, theoretical_gps, 0u);
     step(0u);
     valid(VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY, 100.0f, 0.1f);
     valid(VEHICLE_CL250_DERIVED_INTAKE_FLOW_RESIDUAL, 17.65f, 0.1f);
