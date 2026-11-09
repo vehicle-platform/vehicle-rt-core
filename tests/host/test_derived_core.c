@@ -394,7 +394,7 @@ static void test_computed_set_equals_the_golden_set(void)
 static void test_not_computed_signals_report_a_distinct_reason(void)
 {
     derived_core_init(&core);
-    uint32_t seen[8] = {0u};
+    uint32_t seen[9] = {0u};
     for (uint32_t s = 0u; s < VEHICLE_CL250_DERIVED_COUNT; s++) {
         const derived_nc_reason_t r = derived_core_reason(&core, s);
         const derived_out_t* const o = derived_core_out(&core, s);
@@ -408,8 +408,10 @@ static void test_not_computed_signals_report_a_distinct_reason(void)
         }
         TEST_ASSERT_EQUAL_INT(DERIVED_FLAG_NONE, o->flag);
     }
-    /* an unimplemented ride summary has no formula; an IMU-input signal is not ready */
-    TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT));
+    /* the two ride summaries over every sample of the ride are unbounded; an IMU-input signal is not ready */
+    TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE));
+    TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG));
+    TEST_ASSERT_EQUAL_UINT32(2u, seen[(uint32_t)DERIVED_NC_UNBOUNDED]);
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_NOT_READY, derived_core_reason(&core, VEHICLE_CL250_DERIVED_ACCEL_IMU_RESIDUAL));
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_NOT_READY, derived_core_reason(&core, VEHICLE_CL250_DERIVED_ROAD_GRADE));
     TEST_ASSERT_EQUAL_UINT32(0u, seen[(uint32_t)DERIVED_NC_CLASS]); /* the gen table has only A and B */
