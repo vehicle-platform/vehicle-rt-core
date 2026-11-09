@@ -47,6 +47,21 @@ static bool is_transition(uint8_t opens_on)
     return (opens_on == VEHICLE_CL250_WINDOW_OPEN_ENGINE_START) || (opens_on == VEHICLE_CL250_WINDOW_OPEN_ENGINE_STOP);
 }
 
+/* Window `wi` reads input (kind, index) as a condition, a stable band or its engine trigger. */
+static bool window_reads(uint32_t wi, uint8_t kind, uint32_t index)
+{
+    const vehicle_cl250_window_t* const spec = &vehicle_cl250_window[wi];
+    bool r = is_transition(spec->opens_on) && (kind == VEHICLE_CL250_DERIVED_INPUT_DID) &&
+             (index == (uint32_t)VEHICLE_CL250_IDX_ENGINE_SPEED);
+    for (uint32_t k = 0u; (k < spec->condition_count) && (k < VEHICLE_CL250_WINDOW_CONDITION_MAX); k++) {
+        r = r || ((spec->conditions[k].input.kind == kind) && ((uint32_t)spec->conditions[k].input.index == index));
+    }
+    for (uint32_t k = 0u; (k < spec->stable_count) && (k < VEHICLE_CL250_WINDOW_STABLE_MAX); k++) {
+        r = r || ((spec->stable[k].input.kind == kind) && ((uint32_t)spec->stable[k].input.index == index));
+    }
+    return r;
+}
+
 static bool win_is_zero(double x)
 {
     return (x <= 0.0) && (x >= 0.0);
@@ -139,7 +154,29 @@ static uint32_t input_stale(uint8_t kind, uint8_t index)
 static float cool_decode(uint32_t raw);
 static bool cool_encode(float v, uint16_t* raw);
 
-bool derived_windows_sizing_ok(uint32_t w)
+/* The step event buffer holds at most one sample per distinct wanted DID and one row per
+ * distinct derived window input; true when that worst case fits DERIVED_WINDOWS_EVENT_CAP. */
+static bool events_fit(void)
+{
+    uint32_t n = 0u;
+    for (uint32_t did = 0u; did < VEHICLE_CL250_DID_COUNT; did++) {
+        bool wanted = false;
+        for (uint32_t wi = 0u; wi < DERIVED_WINDOWS_COUNT; wi++) {
+            wanted = wanted || wants_stat(wi, did) || window_reads(wi, VEHICLE_CL250_DERIVED_INPUT_DID, did);
+        }
+        n += wanted ? 1u : 0u;
+    }
+    for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
+        bool wanted = false;
+        for (uint32_t wi = 0u; wi < DERIVED_WINDOWS_COUNT; wi++) {
+            wanted = wanted || window_reads(wi, VEHICLE_CL250_DERIVED_INPUT_DERIVED, sig);
+        }
+        n += wanted ? 1u : 0u;
+    }
+    return n <= DERIVED_WINDOWS_EVENT_CAP;
+}
+
+bool derived_windows_sizing_ok(uint32_t w, uint32_t rpm_hist_cap)
 {
     if (w >= DERIVED_WINDOWS_COUNT) {
         return false;
@@ -174,7 +211,14 @@ bool derived_windows_sizing_ok(uint32_t w)
             need += (((max_stale + 1u) + (poll - 1u)) / poll) + 1u;
         }
     }
-    bool ok = need <= DERIVED_WINDOWS_PEND_CAP;
+    bool ok = (need <= DERIVED_WINDOWS_PEND_CAP) && events_fit();
+    if (w == VEHICLE_CL250_WINDOW_W3_WARM_IDLE) {
+        /* the warm-idle RPM statistics read the core's ENGINE_SPEED history: it must hold every
+         * sample of the longest instance */
+        const uint32_t poll = vehicle_cl250_dids[VEHICLE_CL250_IDX_ENGINE_SPEED].poll_period_ms;
+        ok = ok && (poll != 0u) && (spec->max_duration_ms != 0u) &&
+             (((spec->max_duration_ms / poll) + 2u) <= rpm_hist_cap);
+    }
     if (w == VEHICLE_CL250_WINDOW_W5_POST_STOP) {
         const uint32_t poll = vehicle_cl250_dids[VEHICLE_CL250_IDX_COOLANT_TEMP].poll_period_ms;
         /* stale_after_ms is a uint16 in gen/, so a gap that keeps a coolant sample fresh fits the 16-bit delta */

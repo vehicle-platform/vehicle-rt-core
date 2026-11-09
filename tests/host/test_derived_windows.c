@@ -10,6 +10,7 @@
  * W4 cruise: gear >= 4, speed band 4, throttle band 5, 10 s .. 60 s. W5 post stop: engine
  * stop, ENGINE_SPEED == 0, 60 s .. 1800 s. Stale limits: rpm 330, speed 300, coolant 2400.
  */
+#include "features/derived/derived_core.h"
 #include "features/derived/derived_windows.h"
 
 #include "vehicle_cl250.h"
@@ -564,9 +565,15 @@ static void test_gen_checks(void)
     TEST_ASSERT_TRUE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_COUNT));
     TEST_ASSERT_FALSE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL));
     for (uint32_t w = 0u; w < DERIVED_WINDOWS_COUNT; w++) {
-        TEST_ASSERT_TRUE(derived_windows_sizing_ok(w));
+        TEST_ASSERT_TRUE(derived_windows_sizing_ok(w, DERIVED_WIN_RPM_HIST_CAP));
     }
-    TEST_ASSERT_FALSE(derived_windows_sizing_ok(DERIVED_WINDOWS_COUNT));
+    TEST_ASSERT_FALSE(derived_windows_sizing_ok(DERIVED_WINDOWS_COUNT, DERIVED_WIN_RPM_HIST_CAP));
+    /* the warm-idle RPM statistics need an ENGINE_SPEED history that holds the longest instance */
+    const uint32_t w3_need = (vehicle_cl250_window[VEHICLE_CL250_WINDOW_W3_WARM_IDLE].max_duration_ms /
+                              vehicle_cl250_dids[VEHICLE_CL250_IDX_ENGINE_SPEED].poll_period_ms) + 2u;
+    TEST_ASSERT_TRUE(derived_windows_sizing_ok(VEHICLE_CL250_WINDOW_W3_WARM_IDLE, w3_need));
+    TEST_ASSERT_FALSE(derived_windows_sizing_ok(VEHICLE_CL250_WINDOW_W3_WARM_IDLE, w3_need - 1u));
+    TEST_ASSERT_TRUE(derived_windows_sizing_ok(VEHICLE_CL250_WINDOW_W1_KEY_ON, 0u)); /* only W3 reads it */
     uint8_t chans[DERIVED_WINDOWS_CH_MAX];
     TEST_ASSERT_EQUAL_UINT32(0u, derived_windows_derived_inputs(VEHICLE_CL250_WINDOW_W3_WARM_IDLE, chans));
     TEST_ASSERT_EQUAL_UINT32(1u, derived_windows_derived_inputs(VEHICLE_CL250_WINDOW_W4_CRUISE, chans));

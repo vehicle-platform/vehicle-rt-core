@@ -54,7 +54,8 @@ extern "C" {
  * summed over the window's stat DIDs (derived_windows_sizing_ok() checks it against gen/):
  * W1 12, W3 6, W5 4. */
 #define DERIVED_WINDOWS_PEND_CAP (16u)
-/* New window events of one step: at most one sample per wanted DID plus one derived row. */
+/* New window events of one step: at most one sample per wanted DID plus one row per derived
+ * window input (derived_windows_sizing_ok() checks it against gen/). */
 #define DERIVED_WINDOWS_EVENT_CAP (16u)
 /* Post-stop coolant samples (W5 tau; 4 B each, exact: delta time + raw DID integer): max_duration_ms / coolant poll + 2 = 1 800 000 / 800 + 2.
  * gen/ exports both only as table data, so derived_windows_sizing_ok() checks it at init. */
@@ -185,8 +186,9 @@ uint32_t derived_windows_of_signal(uint32_t sig);
 /* True for a class-B signal this module computes the value of. */
 bool derived_windows_has_summary(uint32_t sig);
 
-/* The pending list and (W5) the coolant buffer fit the gen/ table for window `w`. */
-bool derived_windows_sizing_ok(uint32_t w);
+/* The pending list, the step event buffer, (W3) the core's ENGINE_SPEED history of
+ * `rpm_hist_cap` samples and (W5) the coolant buffer fit the gen/ table for window `w`. */
+bool derived_windows_sizing_ok(uint32_t w, uint32_t rpm_hist_cap);
 
 /* Derived signals window `w` reads as inputs (DID inputs need nothing), into out[]; returns
  * the count, or DERIVED_WINDOWS_CH_MAX + 1 when `w` has a sensor input (never computed). */

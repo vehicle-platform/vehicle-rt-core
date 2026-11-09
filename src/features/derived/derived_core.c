@@ -1356,7 +1356,7 @@ static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
                     }
                 }
             }
-            if ((r == DERIVED_NC_NONE) && (!derived_windows_sizing_ok(win))) {
+            if ((r == DERIVED_NC_NONE) && (!derived_windows_sizing_ok(win, DERIVED_WIN_RPM_HIST_CAP))) {
                 r = DERIVED_NC_SIZING;
             }
         }
