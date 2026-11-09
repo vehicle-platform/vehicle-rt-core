@@ -5,6 +5,7 @@
 #include "features/derived/derived_ride.h"
 
 #include "vehicle_cl250.h"
+#include "vehicle_cl250_constants.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -27,6 +28,14 @@ static const uint16_t slot_signal[DERIVED_RIDE_SLOTS] = {
     VEHICLE_CL250_DERIVED_RIDE_LTFT_MEAN,         VEHICLE_CL250_DERIVED_RIDE_STFT_STD,
     VEHICLE_CL250_DERIVED_RIDE_COOLANT_RATE_MAX,  VEHICLE_CL250_DERIVED_RIDE_START_COOLANT_TEMP,
     VEHICLE_CL250_DERIVED_RIDE_START_INTAKE_TEMP, VEHICLE_CL250_DERIVED_RIDE_END_COOLANT_TEMP,
+    /* the 13 D-103 summaries (LR21b) */
+    VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX,     VEHICLE_CL250_DERIVED_RIDE_CRANKING_DIP,
+    VEHICLE_CL250_DERIVED_RIDE_REST_VOLTAGE,      VEHICLE_CL250_DERIVED_RIDE_COLD_ABUSE_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_OVER_REV_TIME,     VEHICLE_CL250_DERIVED_RIDE_LUGGING_TIME,
+    VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_STD,      VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_DRIFT,
+    VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT,       VEHICLE_CL250_DERIVED_RIDE_LAUNCH_COUNT,
+    VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME,       VEHICLE_CL250_DERIVED_RIDE_THERMAL_CYCLE_COUNT,
+    VEHICLE_CL250_DERIVED_RIDE_FAN_ON_TEMPERATURE,
 };
 
 uint32_t derived_ride_slot(uint32_t sig)
@@ -93,6 +102,90 @@ static void fuel_sample(derived_ride_acc_t* a, float value, uint32_t stamp_ms)
     }
 }
 
+/* The DID sample `stamp` is fresh at time `t` (latest sample at or before t, within the
+ * DID's own stale_after_ms). */
+static bool fresh_at(bool has, uint32_t stamp, uint32_t t, uint16_t limit)
+{
+    const uint32_t age = t - stamp;
+    return has && (age <= 0x7FFFFFFFu) && (age <= (uint32_t)limit);
+}
+
+/* The coolant fresh at `t` when the machine is at rest, in the idle band and above the
+ * minimum (the reference's resting_idle()), else false. */
+static bool resting_idle(const derived_ride_acc_t* a, uint32_t t, float* coolant)
+{
+    bool ok = fresh_at(a->has_speed, a->speed_ms, t, vehicle_cl250_dids[VEHICLE_CL250_IDX_VEHICLE_SPEED].stale_after_ms) &&
+              fresh_at(a->has_rpm, a->rpm_ms, t, vehicle_cl250_dids[VEHICLE_CL250_IDX_ENGINE_SPEED].stale_after_ms) &&
+              fresh_at(a->has_coolant_now, a->coolant_ms, t, vehicle_cl250_dids[VEHICLE_CL250_IDX_COOLANT_TEMP].stale_after_ms);
+    if (ok) {
+        ok = (a->speed_v <= VEHICLE_CL250_DERIVED_MOVING_SPEED_MIN_KMH) &&
+             (a->rpm_v >= VEHICLE_CL250_DERIVED_IDLE_RPM_MIN) && (a->rpm_v <= VEHICLE_CL250_DERIVED_IDLE_RPM_MAX) &&
+             (a->coolant_v > VEHICLE_CL250_RIDE_FAN_ON_TEMPERATURE_COOLANT_MIN_DEGC);
+    }
+    if (ok) {
+        *coolant = a->coolant_v;
+    }
+    return ok;
+}
+
+void derived_ride_settle(derived_ride_acc_t* a)
+{
+    if ((a == NULL) || (!a->batt_pending)) {
+        return;
+    }
+    a->batt_pending = false;
+    float c2 = 0.0f;
+    const bool rest2 = resting_idle(a, a->batt_pend_ms, &c2);
+    const uint32_t gap = a->batt_pend_ms - a->batt_prev_ms;
+    if ((!a->fan_found) && a->has_batt_prev && a->batt_prev_rest && rest2 &&
+        (gap <= (uint32_t)vehicle_cl250_dids[VEHICLE_CL250_IDX_BATTERY_VOLTAGE].stale_after_ms) &&
+        (((double)a->batt_prev_v - (double)a->batt_pend_v) >= (double)VEHICLE_CL250_RIDE_FAN_ON_TEMPERATURE_VOLTAGE_STEP_V)) {
+        a->fan_found = true;
+        a->fan_temp = c2;
+    }
+    a->batt_prev_v = a->batt_pend_v;
+    a->batt_prev_ms = a->batt_pend_ms;
+    a->batt_prev_rest = rest2;
+    a->has_batt_prev = true;
+}
+
+/* A sample of a DID the fan-on step reads: the pending battery sample settles first when
+ * this one is later than it. */
+static void settle_before(derived_ride_acc_t* a, uint32_t stamp_ms)
+{
+    if (a->batt_pending && (stamp_ms != a->batt_pend_ms) && (((uint32_t)(stamp_ms - a->batt_pend_ms)) <= 0x7FFFFFFFu)) {
+        derived_ride_settle(a);
+    }
+}
+
+static void coolant_sample(derived_ride_acc_t* a, float value, uint32_t stamp_ms)
+{
+    settle_before(a, stamp_ms);
+    if (!a->has_coolant) {
+        a->coolant_first = value;
+        a->has_coolant = true;
+        a->first_coolant_warm = value >= VEHICLE_CL250_DERIVED_OPERATING_COOLANT_DEGC;
+    }
+    a->coolant_last = value;
+    a->coolant_v = value;
+    a->coolant_ms = stamp_ms;
+    a->has_coolant_now = true;
+    if ((!a->has_warm) && (value >= VEHICLE_CL250_DERIVED_OPERATING_COOLANT_DEGC)) {
+        a->warm_ms = stamp_ms;
+        a->has_warm = true;
+    }
+    if (value < VEHICLE_CL250_DERIVED_COLD_COOLANT_DEGC) {
+        a->was_cold = true;
+    } else if ((value >= VEHICLE_CL250_DERIVED_OPERATING_COOLANT_DEGC) && a->was_cold) {
+        if (a->thermal_cycles < UINT32_MAX) {
+            a->thermal_cycles++;
+        }
+        a->was_cold = false;
+    } else {
+        /* between the two thresholds the state is kept */
+    }
+}
+
 void derived_ride_sample(derived_ride_acc_t* a, uint32_t did, float value, uint32_t stamp_ms)
 {
     if (a == NULL) {
@@ -114,11 +207,7 @@ void derived_ride_sample(derived_ride_acc_t* a, uint32_t did, float value, uint3
         break;
     }
     case (uint32_t)VEHICLE_CL250_IDX_COOLANT_TEMP:
-        if (!a->has_coolant) {
-            a->coolant_first = value;
-            a->has_coolant = true;
-        }
-        a->coolant_last = value;
+        coolant_sample(a, value, stamp_ms);
         break;
     case (uint32_t)VEHICLE_CL250_IDX_INTAKE_AIR_TEMP:
         if (!a->has_intake) {
@@ -126,14 +215,87 @@ void derived_ride_sample(derived_ride_acc_t* a, uint32_t did, float value, uint3
             a->has_intake = true;
         }
         break;
+    case (uint32_t)VEHICLE_CL250_IDX_ENGINE_SPEED:
+        settle_before(a, stamp_ms);
+        a->rpm_v = value;
+        a->rpm_ms = stamp_ms;
+        a->has_rpm = true;
+        if ((!a->has_rpm_start) && (value > 0.0f)) {
+            a->rpm_start_ms = stamp_ms;
+            a->has_rpm_start = true;
+        }
+        break;
+    case (uint32_t)VEHICLE_CL250_IDX_VEHICLE_SPEED:
+        settle_before(a, stamp_ms);
+        a->speed_v = value;
+        a->speed_ms = stamp_ms;
+        a->has_speed = true;
+        break;
+    case (uint32_t)VEHICLE_CL250_IDX_BATTERY_VOLTAGE:
+        derived_ride_settle(a); /* an earlier battery sample of the same step */
+        a->batt_pend_v = value;
+        a->batt_pend_ms = stamp_ms;
+        a->batt_pending = true;
+        break;
     default:
         break; /* no summary reads this DID */
     }
 }
 
-void derived_ride_class_a(derived_ride_acc_t* a, uint32_t sig, float value)
+/* Index of a flag-time signal, else DERIVED_RIDE_FLAG_TIMES. */
+static uint32_t flag_time_index(uint32_t sig)
 {
-    if (a == NULL) {
+    uint32_t i = DERIVED_RIDE_FLAG_TIMES;
+    if (sig == VEHICLE_CL250_DERIVED_COLD_ENGINE_ABUSE) {
+        i = 0u;
+    } else if (sig == VEHICLE_CL250_DERIVED_OVER_REV) {
+        i = 1u;
+    } else if (sig == VEHICLE_CL250_DERIVED_LUGGING) {
+        i = 2u;
+    } else {
+        /* not a flag-time signal */
+    }
+    return i;
+}
+
+/* One row of a class-A flag output (_flag_seconds): the previous row, when valid with value 1,
+ * counts until this one but never longer than the signal's stale_after_ms. */
+static void flag_time_row(derived_ride_flag_time_t* f, uint32_t sig, uint32_t stamp_ms, bool valid, float value)
+{
+    if (f->has_prev && f->prev_one) {
+        const uint32_t dt = stamp_ms - f->prev_ms;
+        const uint32_t limit = (uint32_t)vehicle_cl250_derived[sig].stale_after_ms;
+        f->total_s += (double)((dt < limit) ? dt : limit) / RIDE_MS_PER_S;
+    }
+    f->prev_ms = stamp_ms;
+    f->has_prev = true;
+    f->prev_one = valid && (value >= 1.0f) && (value <= 1.0f);
+    f->any_valid = f->any_valid || valid;
+}
+
+static void keep_max(float* best, bool* has, float value)
+{
+    if ((!*has) || (value > *best)) {
+        *best = value;
+    }
+    *has = true;
+}
+
+static void keep_first(float* kept, bool* has, float value)
+{
+    if (!*has) {
+        *kept = value;
+    }
+    *has = true;
+}
+
+static void apply_row(derived_ride_acc_t* a, uint32_t sig, uint32_t stamp_ms, bool valid, float value)
+{
+    const uint32_t fi = flag_time_index(sig);
+    if (fi < DERIVED_RIDE_FLAG_TIMES) {
+        flag_time_row(&a->flag_time[fi], sig, stamp_ms, valid, value);
+    }
+    if (!valid) {
         return;
     }
     switch (sig) {
@@ -155,13 +317,159 @@ void derived_ride_class_a(derived_ride_acc_t* a, uint32_t sig, float value)
         }
         break;
     case VEHICLE_CL250_DERIVED_COOLANT_RATE:
-        if ((!a->has_coolant_rate) || (value > a->coolant_rate_max)) {
-            a->coolant_rate_max = value;
+        keep_max(&a->coolant_rate_max, &a->has_coolant_rate, value);
+        break;
+    case VEHICLE_CL250_DERIVED_HEAT_SOAK_DELTA:
+        keep_max(&a->heat_soak_max, &a->has_heat_soak, value);
+        break;
+    case VEHICLE_CL250_DERIVED_CRANKING_DIP:
+        keep_first(&a->cranking_dip, &a->has_cranking_dip, value);
+        break;
+    case VEHICLE_CL250_DERIVED_BATTERY_REST_VOLTAGE:
+        keep_first(&a->rest_voltage, &a->has_rest_voltage, value);
+        break;
+    case VEHICLE_CL250_DERIVED_IDLE_RPM_STD:
+        keep_max(&a->idle_rpm_std_max, &a->has_idle_rpm_std, value);
+        break;
+    case VEHICLE_CL250_DERIVED_IDLE_RPM_DRIFT:
+        a->idle_rpm_drift = value;
+        a->has_idle_rpm_drift = true;
+        break;
+    case VEHICLE_CL250_DERIVED_SHIFT_EVENT:
+        if (a->shift_count < UINT32_MAX) {
+            a->shift_count++;
         }
-        a->has_coolant_rate = true;
+        break;
+    case VEHICLE_CL250_DERIVED_LAUNCH_EVENT:
+        if (a->launch_count < UINT32_MAX) {
+            a->launch_count++;
+        }
         break;
     default:
         break;
+    }
+}
+
+static uint32_t tail_index(uint32_t sig)
+{
+    uint32_t i = DERIVED_RIDE_TAILS;
+    switch (sig) {
+    case VEHICLE_CL250_DERIVED_HEAT_SOAK_DELTA:
+        i = 0u;
+        break;
+    case VEHICLE_CL250_DERIVED_COLD_ENGINE_ABUSE:
+        i = 1u;
+        break;
+    case VEHICLE_CL250_DERIVED_OVER_REV:
+        i = 2u;
+        break;
+    case VEHICLE_CL250_DERIVED_LUGGING:
+        i = 3u;
+        break;
+    case VEHICLE_CL250_DERIVED_IDLE_RPM_STD:
+        i = 4u;
+        break;
+    case VEHICLE_CL250_DERIVED_IDLE_RPM_DRIFT:
+        i = 5u;
+        break;
+    default:
+        break;
+    }
+    return i;
+}
+
+bool derived_ride_is_tail_signal(uint32_t sig)
+{
+    return tail_index(sig) < DERIVED_RIDE_TAILS;
+}
+
+_Static_assert(DERIVED_RIDE_TAIL_POOL == 388u, "the waiting-row pool");
+
+/* Caps in the order of tail_index(); the slices follow each other in the pool. */
+static const uint16_t tail_caps[DERIVED_RIDE_TAILS] = {
+    DERIVED_RIDE_TAIL_CAP_HEAT_SOAK, DERIVED_RIDE_TAIL_CAP_COLD_ABUSE, DERIVED_RIDE_TAIL_CAP_OVER_REV,
+    DERIVED_RIDE_TAIL_CAP_LUGGING,   DERIVED_RIDE_TAIL_CAP_IDLE_STD,   DERIVED_RIDE_TAIL_CAP_IDLE_DRIFT,
+};
+
+uint32_t derived_ride_tail_cap(uint32_t sig)
+{
+    const uint32_t ti = tail_index(sig);
+    return (ti < DERIVED_RIDE_TAILS) ? (uint32_t)tail_caps[ti] : 0u;
+}
+
+uint32_t derived_ride_tail_need(uint32_t sig)
+{
+    uint32_t need = 0u;
+    if (tail_index(sig) < DERIVED_RIDE_TAILS) {
+        const vehicle_cl250_derived_t* const spec = &vehicle_cl250_derived[sig];
+        uint32_t stale = 0u;
+        for (uint32_t k = 0u; (k < (uint32_t)spec->input_count) && (k < VEHICLE_CL250_DERIVED_INPUT_MAX); k++) {
+            const uint32_t idx = spec->inputs[k].index;
+            uint32_t limit = 0u;
+            if (spec->inputs[k].kind == VEHICLE_CL250_DERIVED_INPUT_DID) {
+                limit = (idx < VEHICLE_CL250_DID_COUNT) ? (uint32_t)vehicle_cl250_dids[idx].stale_after_ms : 0u;
+            } else {
+                limit = (idx < VEHICLE_CL250_DERIVED_COUNT) ? (uint32_t)vehicle_cl250_derived[idx].stale_after_ms : 0u;
+            }
+            stale = (limit > stale) ? limit : stale;
+        }
+        const uint32_t period = spec->period_ms;
+        need = (period == 0u) ? UINT32_MAX : (((stale + period) - 1u) / period) + 2u;
+    }
+    return need;
+}
+
+bool derived_ride_tail_fits(uint32_t sig)
+{
+    return derived_ride_tail_cap(sig) >= derived_ride_tail_need(sig);
+}
+
+static derived_ride_row_t* tail_row(derived_ride_acc_t* a, uint32_t ti, uint32_t offset)
+{
+    uint32_t base = 0u;
+    for (uint32_t i = 0u; i < ti; i++) {
+        base += tail_caps[i];
+    }
+    return &a->tail_pool[base + (((uint32_t)a->tail[ti].head + offset) % (uint32_t)tail_caps[ti])];
+}
+
+/* Oldest waiting row out of the ring into the summaries. */
+static void tail_pop(derived_ride_acc_t* a, uint32_t ti, uint32_t sig)
+{
+    derived_ride_tail_t* const t = &a->tail[ti];
+    const derived_ride_row_t r = *tail_row(a, ti, 0u);
+    t->head = (uint16_t)(((uint32_t)t->head + 1u) % (uint32_t)tail_caps[ti]);
+    t->count--;
+    const bool valid = isfinite(r.value) != 0;
+    apply_row(a, sig, r.tick, valid, valid ? r.value : 0.0f);
+}
+
+void derived_ride_advance(derived_ride_acc_t* a, uint32_t sig, uint32_t bound_ms)
+{
+    const uint32_t ti = (a == NULL) ? DERIVED_RIDE_TAILS : tail_index(sig);
+    if (ti < DERIVED_RIDE_TAILS) {
+        while ((a->tail[ti].count > 0u) && ((uint32_t)(bound_ms - tail_row(a, ti, 0u)->tick) <= 0x7FFFFFFFu)) {
+            tail_pop(a, ti, sig);
+        }
+    }
+}
+
+void derived_ride_class_a(derived_ride_acc_t* a, uint32_t sig, uint32_t stamp_ms, bool valid, float value)
+{
+    if (a == NULL) {
+        return;
+    }
+    const uint32_t ti = tail_index(sig);
+    if (ti < DERIVED_RIDE_TAILS) {
+        if (a->tail[ti].count >= tail_caps[ti]) {
+            tail_pop(a, ti, sig); /* full: the oldest row is past every input's stale limit */
+        }
+        derived_ride_row_t* const r = tail_row(a, ti, a->tail[ti].count);
+        r->tick = stamp_ms;
+        r->value = valid ? value : NAN;
+        a->tail[ti].count++;
+    } else {
+        apply_row(a, sig, stamp_ms, valid, value);
     }
 }
 
@@ -232,6 +540,30 @@ static raw_t consumption(const derived_ride_acc_t* a)
     return r;
 }
 
+static raw_t flag_time_raw(const derived_ride_acc_t* a, uint32_t idx)
+{
+    const derived_ride_flag_time_t* const f = &a->flag_time[idx];
+    return f->any_valid ? raw_value(f->total_s) : raw_flag(DERIVED_FLAG_INVALID_INPUT);
+}
+
+/* ride_warmup_time (D-103): first ENGINE_SPEED > 0 to the first COOLANT >= operating. */
+static raw_t warmup_raw(const derived_ride_acc_t* a)
+{
+    raw_t r = raw_flag(DERIVED_FLAG_INVALID_INPUT);
+    if (a->has_coolant && a->has_rpm_start) {
+        if (a->first_coolant_warm) {
+            r = raw_flag(DERIVED_FLAG_STARTS_WARM);
+        } else if (a->has_warm) {
+            const uint32_t d = a->warm_ms - a->rpm_start_ms;
+            r = (d > 0x7FFFFFFFu) ? raw_flag(DERIVED_FLAG_STARTS_WARM) /* before the engine start */
+                                  : raw_value((double)d / RIDE_MS_PER_S);
+        } else {
+            r = raw_flag(DERIVED_FLAG_NEVER_WARM);
+        }
+    }
+    return r;
+}
+
 static raw_t raw_simple(const derived_ride_acc_t* a, uint32_t sig)
 {
     raw_t r = raw_flag(DERIVED_FLAG_INVALID_INPUT);
@@ -274,8 +606,47 @@ static raw_t raw_simple(const derived_ride_acc_t* a, uint32_t sig)
     case VEHICLE_CL250_DERIVED_RIDE_START_INTAKE_TEMP:
         r = last_valid(a->has_intake, a->intake_first);
         break;
-    default: /* VEHICLE_CL250_DERIVED_RIDE_END_COOLANT_TEMP */
+    case VEHICLE_CL250_DERIVED_RIDE_END_COOLANT_TEMP:
         r = last_valid(a->has_coolant, a->coolant_last);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX:
+        r = last_valid(a->has_heat_soak, a->heat_soak_max);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_CRANKING_DIP:
+        r = last_valid(a->has_cranking_dip, a->cranking_dip);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_REST_VOLTAGE:
+        r = last_valid(a->has_rest_voltage, a->rest_voltage);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_COLD_ABUSE_TIME:
+        r = flag_time_raw(a, 0u);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_OVER_REV_TIME:
+        r = flag_time_raw(a, 1u);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_LUGGING_TIME:
+        r = flag_time_raw(a, 2u);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_STD:
+        r = last_valid(a->has_idle_rpm_std, a->idle_rpm_std_max);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_DRIFT:
+        r = last_valid(a->has_idle_rpm_drift, a->idle_rpm_drift);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT:
+        r = raw_value((double)a->shift_count);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_LAUNCH_COUNT:
+        r = raw_value((double)a->launch_count);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME:
+        r = warmup_raw(a);
+        break;
+    case VEHICLE_CL250_DERIVED_RIDE_THERMAL_CYCLE_COUNT:
+        r = raw_value((double)a->thermal_cycles);
+        break;
+    default: /* VEHICLE_CL250_DERIVED_RIDE_FAN_ON_TEMPERATURE */
+        r = a->fan_found ? raw_value((double)a->fan_temp) : raw_flag(DERIVED_FLAG_NO_FAN_STEP);
         break;
     }
     return r;

@@ -30,7 +30,10 @@ typedef enum {
     DERIVED_FLAG_ENGINE_OFF = 10,
     DERIVED_FLAG_NOT_MOVING = 11,
     DERIVED_FLAG_NO_GEAR = 12,
-    DERIVED_FLAG_NOT_APPLICABLE = 13
+    DERIVED_FLAG_NOT_APPLICABLE = 13,
+    DERIVED_FLAG_STARTS_WARM = 16, /* ride_warmup_time: the coolant was warm at the start (the vector flag numbering) */
+    DERIVED_FLAG_NEVER_WARM = 17,  /* ride_warmup_time: the coolant never reached the operating temperature */
+    DERIVED_FLAG_NO_FAN_STEP = 19  /* ride_fan_on_temperature: no qualifying battery drop */
 } derived_flag_t;
 
 typedef enum {
@@ -49,7 +52,8 @@ typedef enum {
     DERIVED_NC_INPUT,    /* a sensor input, or a derived input that is not computed */
     DERIVED_NC_SIZING,   /* its window does not fit the compile-time sample buffer */
     DERIVED_NC_ELEMENTS, /* binned, multi-element or per-gear: needs more than a scalar state */
-    DERIVED_NC_GEN       /* the gen/ entry is inconsistent (no period, no window) */
+    DERIVED_NC_GEN,      /* the gen/ entry is inconsistent (no period, no window) */
+    DERIVED_NC_UNBOUNDED /* needs the whole ride's samples: not bounded on the MCU */
 } derived_nc_reason_t;
 
 /* One DID sample as the glue hands it in (services/vehicle_signals through the snapshot). */

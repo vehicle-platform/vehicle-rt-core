@@ -61,32 +61,20 @@ static const bscenario_t scenarios[] = {
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
 
-/* Defs v0.24.0 selects the class-B summaries over the new D-103 signals too. This run is
- * class-A only, so these are NOT_COMPUTED with DERIVED_NC_NO_FORMULA; the golden replay
- * asserts that exact set instead of silently skipping it. When a class-B formula lands,
- * remove its entry here and lower the expected NOT_COMPUTED count in the same commit. */
-static const uint16_t D103_CLASS_B_NOT_COMPUTED[] = {
-    VEHICLE_CL250_DERIVED_RIDE_WARMUP_TIME,
-    VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX,
-    VEHICLE_CL250_DERIVED_RIDE_THERMAL_CYCLE_COUNT,
-    VEHICLE_CL250_DERIVED_RIDE_FAN_ON_TEMPERATURE,
-    VEHICLE_CL250_DERIVED_RIDE_CRANKING_DIP,
-    VEHICLE_CL250_DERIVED_RIDE_REST_VOLTAGE,
-    VEHICLE_CL250_DERIVED_RIDE_COLD_ABUSE_TIME,
-    VEHICLE_CL250_DERIVED_RIDE_OVER_REV_TIME,
-    VEHICLE_CL250_DERIVED_RIDE_LUGGING_TIME,
-    VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_STD,
-    VEHICLE_CL250_DERIVED_RIDE_IDLE_RPM_DRIFT,
+/* Two D-103 class-B summaries need every sample of the ride (ride_aggressiveness_score: a p95
+ * over the whole ride; throttle_torque_lag: a median over every throttle step plus a
+ * cross-correlation per step), which is not bounded on the MCU. They are NOT_COMPUTED with
+ * DERIVED_NC_UNBOUNDED; the golden replay asserts that exact set instead of silently skipping
+ * it. The other 13 D-103 class-B summaries are computed and compared. */
+static const uint16_t UNBOUNDED_CLASS_B_NOT_COMPUTED[] = {
     VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
-    VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT,
-    VEHICLE_CL250_DERIVED_RIDE_LAUNCH_COUNT,
     VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE,
 };
 
-static bool is_d103_class_b_not_computed(uint32_t sig)
+static bool is_unbounded_not_computed(uint32_t sig)
 {
-    for (uint32_t i = 0u; i < (uint32_t)(sizeof D103_CLASS_B_NOT_COMPUTED / sizeof D103_CLASS_B_NOT_COMPUTED[0]); i++) {
-        if (D103_CLASS_B_NOT_COMPUTED[i] == sig) {
+    for (uint32_t i = 0u; i < (uint32_t)(sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED / sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED[0]); i++) {
+        if (UNBOUNDED_CLASS_B_NOT_COMPUTED[i] == sig) {
             return true;
         }
     }
@@ -186,9 +174,9 @@ static void compare_ride(const bscenario_t* sc, uint16_t ride)
         if (e->ride != ride) {
             continue;
         }
-        if (is_d103_class_b_not_computed(e->signal)) {
+        if (is_unbounded_not_computed(e->signal)) {
             TEST_ASSERT_FALSE(derived_core_is_computed(&core, e->signal));
-            TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, e->signal));
+            TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, e->signal));
             continue;
         }
         derived_out_t o;
@@ -268,9 +256,9 @@ static void compare_records(const bscenario_t* sc, uint16_t ride)
             if (f->did_idx != idx) {
                 continue;
             }
-            if (is_d103_class_b_not_computed(f->signal)) {
+            if (is_unbounded_not_computed(f->signal)) {
                 TEST_ASSERT_FALSE(derived_core_is_computed(&core, f->signal));
-                TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, f->signal));
+                TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, f->signal));
                 continue;
             }
             const uint32_t want = be_get(&e->bytes[f->byte], f->length);
@@ -375,10 +363,10 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
             continue;
         }
         class_b_computed += derived_core_is_computed(&core, s) ? 1u : 0u;
-        if (is_d103_class_b_not_computed(s)) {
+        if (is_unbounded_not_computed(s)) {
             TEST_ASSERT_TRUE(golden[s]);
             TEST_ASSERT_FALSE(derived_core_is_computed(&core, s));
-            TEST_ASSERT_EQUAL_INT(DERIVED_NC_NO_FORMULA, derived_core_reason(&core, s));
+            TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, s));
             continue;
         }
         if (golden[s] != derived_core_is_computed(&core, s)) {
@@ -392,7 +380,7 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
     TEST_ASSERT_EQUAL_UINT32(0u, differences);
     TEST_ASSERT_EQUAL_UINT32(27u, n_golden);
     TEST_ASSERT_EQUAL_UINT32(DERIVED_RIDE_SLOTS, class_b_computed);
-    TEST_ASSERT_EQUAL_UINT32(15u, (uint32_t)(sizeof D103_CLASS_B_NOT_COMPUTED / sizeof D103_CLASS_B_NOT_COMPUTED[0]));
+    TEST_ASSERT_EQUAL_UINT32(2u, (uint32_t)(sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED / sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED[0]));
 }
 
 static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
@@ -402,7 +390,7 @@ static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_ELEMENTS, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_COOLANT_TIME_AT_TEMP));
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_ELEMENTS, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_FINAL_DRIVE_RATIO));
     const uint32_t others[] = {VEHICLE_CL250_DERIVED_RIDE_DISTANCE_GPS, VEHICLE_CL250_DERIVED_RIDE_BUS_OFF_COUNT,
-                               VEHICLE_CL250_DERIVED_RIDE_HEAT_SOAK_MAX, VEHICLE_CL250_DERIVED_RIDE_SHIFT_COUNT,
+                               VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
                                VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_REST_VOLTAGE,
                                VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_TAU,
                                VEHICLE_CL250_DERIVED_SPEEDOMETER_ERROR};

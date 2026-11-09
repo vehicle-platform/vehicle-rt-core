@@ -923,8 +923,9 @@ void derived_core_store(derived_core_t* c, uint32_t sig, uint32_t stamp, derived
             derived_core_ring_push(c, RING_ACCEL, value, stamp);
         }
     }
-    if (c->ride.open && (f == DERIVED_FLAG_NONE)) {
-        derived_ride_class_a(&c->ride.acc, sig, value); /* the ride's last-valid / count / max */
+    if (c->ride.open) {
+        /* every row: the ride's last-valid / count / max / first and the flag times */
+        derived_ride_class_a(&c->ride.acc, sig, stamp, f == DERIVED_FLAG_NONE, value);
     }
 }
 
@@ -1014,6 +1015,9 @@ static void ingest(derived_core_t* c, uint32_t now, const derived_in_t* in)
                 d->lapsed = true; /* a wrapped counter can never make it fresh again */
             }
         }
+    }
+    if (c->ride.open) {
+        derived_ride_settle(&c->ride.acc); /* the fan-on step of this ingest's battery sample */
     }
 }
 
@@ -1137,6 +1141,65 @@ static void epoch_step(derived_core_t* c, uint32_t now, const derived_epoch_t* e
     }
 }
 
+/*
+ * The reference evaluates a grid signal on [start, end], end = the last time every input has a
+ * sample (a derived input: its own last grid tick). The class-B summaries must not see the rows
+ * after it, so a row of the signals in derived_ride_is_tail_signal() waits in the ride until
+ * every input has a sample at or after its tick. `end_of[sig]` is that bound, computed in
+ * table order (a producer comes before its consumer), and the waiting rows up to it are
+ * confirmed. A signal with an input never seen has no bound: its rows keep waiting.
+ */
+static void ride_confirm_rows(derived_core_t* c)
+{
+    if (!c->ride.open) {
+        return;
+    }
+    uint32_t end_of[VEHICLE_CL250_DERIVED_COUNT];
+    bool has_end[VEHICLE_CL250_DERIVED_COUNT];
+    (void)memset(end_of, 0, sizeof end_of);
+    (void)memset(has_end, 0, sizeof has_end);
+    for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
+        const vehicle_cl250_derived_t* const spec = &vehicle_cl250_derived[sig];
+        if ((!c->sched[sig].computed) || (spec->derived_class != VEHICLE_CL250_DERIVED_CLASS_LIVE)) {
+            continue;
+        }
+        bool ok = true;
+        bool first = true;
+        uint32_t bound = 0u;
+        for (uint32_t k = 0u; (k < (uint32_t)spec->input_count) && (k < VEHICLE_CL250_DERIVED_INPUT_MAX) && ok; k++) {
+            const uint32_t idx = spec->inputs[k].index;
+            uint32_t t = 0u;
+            if (spec->inputs[k].kind == VEHICLE_CL250_DERIVED_INPUT_DID) {
+                ok = (idx < VEHICLE_CL250_DID_COUNT) && c->did[idx].seen;
+                t = c->did[idx].stamp_ms;
+            } else if ((idx < VEHICLE_CL250_DERIVED_COUNT) && has_end[idx]) {
+                const vehicle_cl250_derived_t* const dep = &vehicle_cl250_derived[idx];
+                if (dep->event) {
+                    t = c->out[idx].stamp_ms; /* an event input: the last event row */
+                } else {
+                    const derived_sched_t* const ds = &c->sched[idx];
+                    const uint32_t span = end_of[idx] - ds->start_ms;
+                    ok = ds->armed && (span <= HALF_RANGE);
+                    t = ds->start_ms + ((span / (uint32_t)dep->period_ms) * (uint32_t)dep->period_ms);
+                }
+            } else {
+                ok = false;
+            }
+            if (ok) {
+                bound = first ? t : (derived_core_at_or_after(bound, t) ? t : bound);
+                first = false;
+            }
+        }
+        if (ok && (!first)) {
+            end_of[sig] = bound;
+            has_end[sig] = true;
+            if (derived_ride_is_tail_signal(sig)) {
+                derived_ride_advance(&c->ride.acc, sig, bound);
+            }
+        }
+    }
+}
+
 void derived_core_step_epoch(derived_core_t* c, uint32_t now_ms, const derived_in_t* in,
                              const derived_epoch_t* epoch)
 {
@@ -1166,6 +1229,7 @@ void derived_core_step_epoch(derived_core_t* c, uint32_t now_ms, const derived_i
             event_step(c, sig);
         }
     }
+    ride_confirm_rows(c);
     if (c->evals_step > c->evals_max) {
         c->evals_max = c->evals_step;
     }
@@ -1227,7 +1291,7 @@ static bool sizing_ok(uint32_t sig)
         ok = true;
         break;
     }
-    return ok;
+    return ok && derived_ride_tail_fits(sig); /* the waiting rows of the ride summaries */
 }
 
 static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
@@ -1241,6 +1305,8 @@ static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
         r = DERIVED_NC_NOT_READY;
     } else if (ride && ((s->elements != 1u) || (s->axis_count != 0u) || s->per_gear)) {
         r = DERIVED_NC_ELEMENTS; /* binned or per-gear: more than a scalar state */
+    } else if ((sig == VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE) || (sig == VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG)) {
+        r = DERIVED_NC_UNBOUNDED; /* a p95 / a median over every sample or step of the ride */
     } else if (kind_of(sig) == KIND_NONE) {
         r = DERIVED_NC_NO_FORMULA;
     } else if ((s->input_count == 0u) || (s->input_count > VEHICLE_CL250_DERIVED_INPUT_MAX) ||
