@@ -86,7 +86,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_MG_PER_KG (1.0e6f)                     /* formulas.py:49 */
 #define DERIVED_G_PER_KG (1000.0f)                     /* formulas.py:50 */
 #define DERIVED_SECONDS_PER_MINUTE (60.0f)             /* formulas.py:51 */
-#define DERIVED_REVOLUTIONS_PER_INJECTION (2.0f)       /* four-stroke, formulas.py:54 */
 #define DERIVED_GPS_TO_KG_PER_H (3.6f)                 /* g/s -> kg/h, formulas.py:395 */
 #define DERIVED_SECONDS_PER_HOUR (3600.0f)             /* km/h -> km/s, formulas.py:296 */
 #define DERIVED_PA_PER_KPA (1000.0f)                   /* formulas.py:155 */
@@ -94,7 +93,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_MS_PER_S (1000.0f)                     /* formulas.py:168 */
 #define DERIVED_M3_PER_CM3 (1.0e-6f)                   /* cm3 -> m3, d103_windows.py */
 #define DERIVED_R_AIR_VE (287.05f)                     /* J/(kg K), d103_windows.py */
-#define DERIVED_INTAKE_STROKES_PER_MIN (120.0f)        /* four-stroke: rpm / 120 per second */
 /* SAE J1349 reference conditions of the power correction: algorithm parameters, provisional
  * (D-070 item 6), formulas.py:56-57. */
 #define DERIVED_J1349_REFERENCE_PRESSURE_KPA (99.0f)

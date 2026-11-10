@@ -53,7 +53,7 @@ uint8_t derived_gear_estimate(float measured_ratio)
                 best_gear = (uint8_t)(i + 1u);
             }
         }
-        if (best <= DERIVED_GEAR_MATCH_TOLERANCE) {
+        if (best <= VEHICLE_CL250_DERIVED_GEAR_MATCH_TOLERANCE) {
             gear = best_gear;
         }
     }

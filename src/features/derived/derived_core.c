@@ -598,7 +598,7 @@ static derived_flag_t f_fuel_per_stroke(const derived_ctx_t* x, float* out)
             f = derived_core_did_value(x, (uint32_t)VEHICLE_CL250_IDX_ENGINE_FUEL_RATE, &rate);
             if (f == DERIVED_FLAG_NONE) {
                 const float mg_per_hour = (rate * VEHICLE_CL250_FUEL_DENSITY_KG_PER_L) * DERIVED_MG_PER_KG;
-                *out = mg_per_hour / ((rpm * DERIVED_SECONDS_PER_MINUTE) / DERIVED_REVOLUTIONS_PER_INJECTION);
+                *out = mg_per_hour / ((rpm * DERIVED_SECONDS_PER_MINUTE) / (float)VEHICLE_CL250_ENGINE_REVOLUTIONS_PER_CYCLE);
             }
         }
     }

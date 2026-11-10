@@ -135,7 +135,7 @@ static bool gear_near_threshold(void)
     const derived_out_t* const r = derived_core_out(&core, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED);
     for (uint32_t i = 0u; i < 6u; i++) {
         const float dev = fabsf((r->unranged / ratios[i]) - 1.0f);
-        if (fabsf(dev - DERIVED_GEAR_MATCH_TOLERANCE) < 1.0e-3f) {
+        if (fabsf(dev - VEHICLE_CL250_DERIVED_GEAR_MATCH_TOLERANCE) < 1.0e-3f) {
             return true;
         }
     }
