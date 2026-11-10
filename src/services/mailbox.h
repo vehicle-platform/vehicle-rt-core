@@ -17,6 +17,12 @@
  *                     layout word differs it writes no M7->M4 slot and drops the pending
  *                     frames (counted, never held for later; E-28 (5), user 2026-11-04).
  *
+ * Age limit (D-093 amendment 2 principle, E-28 follow-up, ISSUES E-28): a pending M7->M4 frame deferred by a refused
+ * HSEM is dropped (never written late) once it has waited strictly longer than its
+ * message's gen/ cycle time; a newer offer replaces and restamps it. The age counts from
+ * the first mailbox_step() pass that sees the frame, which follows its offer in the same
+ * comms pass.
+ *
  * Both run in the comms task: one accessing context per slot on the M7 (D-093 item 5),
  * so the slot state here needs no lock. CI greps the two call sites.
  *
@@ -73,6 +79,8 @@ typedef struct {
     uint32_t write_dropped;    /* M7->M4 frames dropped while the M4 layout word differed; also
                                 * > 0 after a normal boot with the M7 first, so a DTC uses
                                 * layout_mismatch (with its grace), never this alone */
+    uint32_t write_aged;       /* M7->M4 frames dropped for waiting longer than their message's
+                                * cycle for the slot's HSEM (also counted in write_dropped) */
     uint32_t read_busy;        /* M4->M7 reads with the HSEM not taken */
     uint32_t read_rejected;    /* M4->M7 frames dropped: layout mismatch or bad len */
     uint32_t forward_done;     /* M4->M7 frames the platform port accepted */

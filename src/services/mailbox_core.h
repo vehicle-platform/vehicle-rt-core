@@ -20,7 +20,8 @@
  *
  *   writer  mailbox_pending_offer()        any time (no lock): keep the newest frame
  *           take HSEM -> mailbox_slot_store() -> barrier -> mailbox_slot_commit() -> release
- *           not taken  -> mailbox_pending_defer()   (kept for the next pass)
+ *           not taken  -> mailbox_pending_defer()   (kept for the next pass, but never longer
+ *                         than its message's cycle: mailbox_pending_aged() -> mailbox_pending_drop_aged())
  *   reader  take HSEM -> mailbox_slot_load() -> release -> mailbox_reader_accept()
  *           not taken  -> mailbox_reader_busy()     ("no new frame" this pass)
  */
@@ -62,7 +63,11 @@ typedef struct {
     uint32_t done;     /* frames written / forwarded (saturating) */
     uint32_t deferred; /* passes the frame had to wait (HSEM or TX busy) */
     uint32_t overruns; /* a pending frame replaced by a newer one: lost (D-093 item 5 as narrowed) */
-    uint32_t dropped;  /* frames given up (the forward's bus-off or latched port, the writer's peer mismatch) */
+    uint32_t dropped;  /* frames given up (the forward's bus-off or latched port, the writer's peer mismatch,
+                        * the writer's aged frames: those are also counted in `aged`) */
+    uint32_t aged;     /* writer: frames dropped for waiting longer than their cycle (D-093 amendment 2 principle, E-28 follow-up) */
+    uint32_t stamped_ms; /* the pass time the pending frame was first seen by the writer */
+    bool stamped;        /* stamped_ms is valid for the current pending frame */
 } mailbox_pending_t;
 
 /* A slot's raw content as read under its HSEM. */
@@ -98,6 +103,24 @@ void mailbox_pending_init(mailbox_pending_t* p);
 /* Keeps data[0..len) (len 1..8) as the frame to write next. A frame still pending is
  * replaced and counted as an overrun. False (nothing changed) for NULL or a bad len. */
 bool mailbox_pending_offer(mailbox_pending_t* p, const uint8_t* data, uint8_t len);
+
+/* Writer, once per pass before a write attempt: the first call after an offer records `now_ms`
+ * as the time the frame was offered (the glue's offer and step run in the same comms
+ * pass, so this is the offer time to within one pass); later calls change nothing. A newer
+ * offer replaces the frame and clears the stamp, so the age restarts. */
+void mailbox_pending_stamp(mailbox_pending_t* p, uint32_t now_ms);
+
+/* Pure age decision (wrap-safe modulo 2^32): true when more than cycle_ms elapsed from
+ * offered_ms to now_ms. An age equal to the cycle is NOT aged (the frame is still written). */
+bool mailbox_age_exceeds(uint32_t offered_ms, uint32_t now_ms, uint32_t cycle_ms);
+
+/* True when the pending, stamped frame is strictly older than cycle_ms at now_ms. */
+bool mailbox_pending_aged(const mailbox_pending_t* p, uint32_t now_ms, uint32_t cycle_ms);
+
+/* The frame waited longer than its cycle: given up, counted in `aged` and `dropped`, no
+ * longer pending. Never written late (a late frame would carry an E2E counter step of 1
+ * and read as valid with a stale payload). */
+void mailbox_pending_drop_aged(mailbox_pending_t* p);
 
 /* The frame could not go this pass (HSEM or bus busy): it stays pending. */
 void mailbox_pending_defer(mailbox_pending_t* p);

@@ -309,6 +309,70 @@ static void test_counters_saturate(void)
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, pend.deferred);
 }
 
+/* D-093 amendment 2 principle, E-28 follow-up: the age limit is a pure decision, strictly older than the cycle. */
+static void test_the_age_limit_is_strictly_above_the_cycle(void)
+{
+    const uint32_t cycle = PLATFORM_EKF_LEAN_CYCLE_TIME_MS;
+    TEST_ASSERT_FALSE(mailbox_age_exceeds(1000u, 1000u, cycle));
+    TEST_ASSERT_FALSE(mailbox_age_exceeds(1000u, 1000u + cycle - 1u, cycle));
+    TEST_ASSERT_FALSE(mailbox_age_exceeds(1000u, 1000u + cycle, cycle)); /* equal: still written */
+    TEST_ASSERT_TRUE(mailbox_age_exceeds(1000u, 1000u + cycle + 1u, cycle));
+    TEST_ASSERT_TRUE(mailbox_age_exceeds(1000u, 1000u + (10u * cycle), cycle));
+}
+
+static void test_the_age_limit_is_wrap_safe(void)
+{
+    const uint32_t cycle = PLATFORM_EKF_LEAN_CYCLE_TIME_MS;
+    const uint32_t off = UINT32_MAX - 5u; /* the counter wraps 6 ms later */
+    TEST_ASSERT_FALSE(mailbox_age_exceeds(off, off + cycle, cycle));
+    TEST_ASSERT_TRUE(mailbox_age_exceeds(off, (uint32_t)(off + cycle + 1u), cycle));
+    TEST_ASSERT_FALSE(mailbox_age_exceeds(off, 3u, cycle)); /* 9 ms across the wrap */
+    TEST_ASSERT_TRUE(mailbox_age_exceeds(UINT32_MAX, 20u, cycle - 1u)); /* 21 ms */
+}
+
+static void test_a_pending_frame_is_stamped_once_and_a_newer_offer_restamps(void)
+{
+    uint8_t d[MAILBOX_PAYLOAD_BYTES];
+    frame(1u, d);
+    const uint32_t cycle = PLATFORM_EKF_LEAN_CYCLE_TIME_MS;
+    mailbox_pending_stamp(&pend, 100u); /* nothing pending: no stamp */
+    TEST_ASSERT_FALSE(pend.stamped);
+    TEST_ASSERT_FALSE(mailbox_pending_aged(&pend, 100u + cycle + 5u, cycle));
+    TEST_ASSERT_TRUE(mailbox_pending_offer(&pend, d, LEN));
+    TEST_ASSERT_FALSE(mailbox_pending_aged(&pend, 100u + cycle + 5u, cycle)); /* not stamped yet */
+    mailbox_pending_stamp(&pend, 100u);
+    mailbox_pending_stamp(&pend, 150u); /* later calls change nothing */
+    TEST_ASSERT_EQUAL_UINT32(100u, pend.stamped_ms);
+    TEST_ASSERT_FALSE(mailbox_pending_aged(&pend, 100u + cycle, cycle));
+    TEST_ASSERT_TRUE(mailbox_pending_aged(&pend, 100u + cycle + 1u, cycle));
+    TEST_ASSERT_TRUE(mailbox_pending_offer(&pend, d, LEN)); /* replaces: the age restarts */
+    TEST_ASSERT_FALSE(pend.stamped);
+    mailbox_pending_stamp(&pend, 200u);
+    TEST_ASSERT_FALSE(mailbox_pending_aged(&pend, 200u + cycle, cycle));
+    TEST_ASSERT_FALSE(mailbox_pending_aged(NULL, 0u, cycle));
+}
+
+static void test_an_aged_drop_counts_aged_and_dropped_and_clears_pending(void)
+{
+    uint8_t d[MAILBOX_PAYLOAD_BYTES];
+    frame(1u, d);
+    mailbox_pending_drop_aged(&pend); /* nothing pending: nothing counted */
+    TEST_ASSERT_EQUAL_UINT32(0u, pend.aged);
+    TEST_ASSERT_TRUE(mailbox_pending_offer(&pend, d, LEN));
+    mailbox_pending_stamp(&pend, 5u);
+    mailbox_pending_drop_aged(&pend);
+    TEST_ASSERT_FALSE(pend.pending);
+    TEST_ASSERT_EQUAL_UINT32(1u, pend.aged);
+    TEST_ASSERT_EQUAL_UINT32(1u, pend.dropped);
+    TEST_ASSERT_EQUAL_UINT32(0u, pend.done);
+    mailbox_pending_drop_aged(NULL);
+    pend.aged = UINT32_MAX;
+    TEST_ASSERT_TRUE(mailbox_pending_offer(&pend, d, LEN));
+    mailbox_pending_drop_aged(&pend);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, pend.aged);
+    mailbox_pending_stamp(NULL, 0u);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -330,5 +394,9 @@ int main(void)
     RUN_TEST(test_stale_ages_across_the_ms_wrap);
     RUN_TEST(test_busy_and_null_arguments_are_harmless);
     RUN_TEST(test_counters_saturate);
+    RUN_TEST(test_the_age_limit_is_strictly_above_the_cycle);
+    RUN_TEST(test_the_age_limit_is_wrap_safe);
+    RUN_TEST(test_a_pending_frame_is_stamped_once_and_a_newer_offer_restamps);
+    RUN_TEST(test_an_aged_drop_counts_aged_and_dropped_and_clears_pending);
     return UNITY_END();
 }

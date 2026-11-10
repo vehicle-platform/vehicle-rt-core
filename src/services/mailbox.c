@@ -27,38 +27,44 @@ typedef struct {
     uint8_t direction;
     uint32_t offset;     /* bytes from the region base */
     uint32_t timeout_ms; /* E2E timeout of the slot message */
+    uint32_t cycle_ms;   /* cycle time of the slot message (the M7->M4 age limit) */
 } mailbox_slot_def_t;
 
 static const mailbox_slot_def_t slot_defs[PLATFORM_MAILBOX_SLOT_COUNT] = {
     {PLATFORM_MAILBOX_SLOT_EKF_LEAN_FRAME_ID, PLATFORM_EKF_LEAN_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_LEAN_LENGTH, (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_LEAN_DIRECTION, PLATFORM_MAILBOX_SLOT_EKF_LEAN_OFFSET,
-     PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS},
+     PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS, PLATFORM_EKF_LEAN_CYCLE_TIME_MS},
     {PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_FRAME_ID, PLATFORM_EKF_FRICTION_MASS_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_LENGTH,
      (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_DIRECTION,
-     PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_OFFSET, PLATFORM_EKF_FRICTION_MASS_E2E_TIMEOUT_MS},
+     PLATFORM_MAILBOX_SLOT_EKF_FRICTION_MASS_OFFSET,
+     PLATFORM_EKF_FRICTION_MASS_E2E_TIMEOUT_MS, PLATFORM_EKF_FRICTION_MASS_CYCLE_TIME_MS},
     {PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_FRAME_ID, PLATFORM_HEARTBEAT_RT_CORE_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_LENGTH,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_DIRECTION,
-     PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_OFFSET, PLATFORM_HEARTBEAT_RT_CORE_E2E_TIMEOUT_MS},
+     PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_OFFSET,
+     PLATFORM_HEARTBEAT_RT_CORE_E2E_TIMEOUT_MS, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS},
     {PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_FRAME_ID, PLATFORM_SAFETY_REQUEST_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_LENGTH,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_DIRECTION,
-     PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_OFFSET, PLATFORM_SAFETY_REQUEST_E2E_TIMEOUT_MS},
+     PLATFORM_MAILBOX_SLOT_SAFETY_REQUEST_OFFSET,
+     PLATFORM_SAFETY_REQUEST_E2E_TIMEOUT_MS, PLATFORM_SAFETY_REQUEST_CYCLE_TIME_MS},
     {PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_FRAME_ID, PLATFORM_SAFETY_WARNING_STATUS_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_LENGTH,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_DIRECTION,
-     PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_OFFSET, PLATFORM_SAFETY_WARNING_STATUS_E2E_TIMEOUT_MS},
+     PLATFORM_MAILBOX_SLOT_SAFETY_WARNING_STATUS_OFFSET,
+     PLATFORM_SAFETY_WARNING_STATUS_E2E_TIMEOUT_MS, PLATFORM_SAFETY_WARNING_STATUS_CYCLE_TIME_MS},
     {PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_FRAME_ID, PLATFORM_HEARTBEAT_SAFETY_IS_EXTENDED != 0,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_LENGTH,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_HSEM_ID,
      (uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_DIRECTION,
-     PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_OFFSET, PLATFORM_HEARTBEAT_SAFETY_E2E_TIMEOUT_MS},
+     PLATFORM_MAILBOX_SLOT_HEARTBEAT_SAFETY_OFFSET,
+     PLATFORM_HEARTBEAT_SAFETY_E2E_TIMEOUT_MS, PLATFORM_HEARTBEAT_SAFETY_CYCLE_TIME_MS},
 };
 
 /* The rows above are in slot order: a reordered or extended gen/ table fails here. */
@@ -79,6 +85,20 @@ _Static_assert(PLATFORM_HEARTBEAT_RT_CORE_E2E_MAX_DELTA_COUNTER == 1u, "D-093 am
 _Static_assert(PLATFORM_SAFETY_REQUEST_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
 _Static_assert(PLATFORM_SAFETY_WARNING_STATUS_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
 _Static_assert(PLATFORM_HEARTBEAT_SAFETY_E2E_MAX_DELTA_COUNTER == 1u, "D-093 amendments 1-2 need max delta 1");
+/* The age limit (D-093 amendment 2 addendum 2, 2026-11-11) needs 0 < cycle < E2E timeout on
+ * every M7->M4 slot message: a zero cycle would drop every deferred frame, and a cycle at or
+ * above the timeout would let a held frame outlive the M4's E2E supervision. */
+_Static_assert((PLATFORM_EKF_LEAN_CYCLE_TIME_MS > 0u) &&
+                   (PLATFORM_EKF_LEAN_CYCLE_TIME_MS < PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS), "0 < cycle < E2E timeout");
+_Static_assert((PLATFORM_EKF_FRICTION_MASS_CYCLE_TIME_MS > 0u) &&
+                   (PLATFORM_EKF_FRICTION_MASS_CYCLE_TIME_MS < PLATFORM_EKF_FRICTION_MASS_E2E_TIMEOUT_MS),
+               "0 < cycle < E2E timeout");
+_Static_assert((PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS > 0u) &&
+                   (PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS < PLATFORM_HEARTBEAT_RT_CORE_E2E_TIMEOUT_MS),
+               "0 < cycle < E2E timeout");
+_Static_assert((PLATFORM_SAFETY_REQUEST_CYCLE_TIME_MS > 0u) &&
+                   (PLATFORM_SAFETY_REQUEST_CYCLE_TIME_MS < PLATFORM_SAFETY_REQUEST_E2E_TIMEOUT_MS),
+               "0 < cycle < E2E timeout");
 /* Mailbox HSEM IDs stay in 1..31 (ID 0 is vendor boot code's, D-093 item 5). */
 _Static_assert((PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID >= HAL_HSEM_ID_MIN) &&
                    (PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID <= HAL_HSEM_ID_MAX), "HSEM ID range");
@@ -204,13 +224,24 @@ bool mailbox_offer(uint32_t frame_id, bool extended, const uint8_t* data, uint8_
  * (5), user 2026-11-04). The drop relies on max delta 1 (asserted above): the M4 then
  * reads the gap as WRONG_SEQUENCE, or INITIAL after its timeout, never as valid. A one-pass
  * wipe of a matching M4's word also drops that pass's frames (fails towards UNAVAILABLE). */
-static void write_slot(uint32_t i, bool peer_ok)
+static void write_slot(uint32_t i, bool peer_ok, uint32_t now_ms)
 {
     if (!mb_pending[i].pending) {
         return;
     }
     if (!peer_ok) {
         mailbox_pending_drop(&mb_pending[i]);
+        return;
+    }
+    /* Same principle for a frame the HSEM kept waiting: strictly older than its cycle at
+     * this attempt means drop, never hold (D-093 amendment 2 addendum 2, 2026-11-11). The M4
+     * then sees a gap. Bound: with a bus-off behind it and the HSEM held, the M4 may still
+     * use a payload up to E2E timeout + cycle + 1 ms old (0x020: 60 + 20 + 1 = 81 ms; the
+     * last delivered frame ages to its timeout, the held one to cycle + 1 pass, the stamp
+     * lagging the offer by at most a pass). */
+    mailbox_pending_stamp(&mb_pending[i], now_ms);
+    if (mailbox_pending_aged(&mb_pending[i], now_ms, slot_defs[i].cycle_ms)) {
+        mailbox_pending_drop_aged(&mb_pending[i]);
         return;
     }
     hal_hsem_key_t key;
@@ -362,7 +393,7 @@ void mailbox_step(uint32_t now_ms)
     }
     for (uint32_t i = 0u; i < PLATFORM_MAILBOX_SLOT_COUNT; i++) {
         if (m7_writes(i)) {
-            write_slot(i, peer_ok);
+            write_slot(i, peer_ok, now_ms);
         } else if (m7_reads(i)) {
             read_slot(i, peer_ok, now_ms);
             forward_slot(i);
@@ -394,6 +425,7 @@ mailbox_health_t mailbox_health(uint32_t now_ms)
             h.write_deferred = mb_sat_add(h.write_deferred, p->deferred);
             h.write_overruns = mb_sat_add(h.write_overruns, p->overruns);
             h.write_dropped = mb_sat_add(h.write_dropped, p->dropped);
+            h.write_aged = mb_sat_add(h.write_aged, p->aged);
         } else if (m7_reads(i)) {
             const mailbox_reader_t* const r = &mb_reader[i];
             if (mailbox_reader_stale(r, now_ms, slot_defs[i].timeout_ms)) {
