@@ -19,6 +19,7 @@
 #include "services/can_sm.h"
 #include "services/com.h"
 #include "services/diag.h"
+#include "vehicle_e2e.h"
 #include "platform_uds.h"
 
 #include <string.h>
@@ -323,6 +324,147 @@ static void test_a_frame_replaced_while_pending_is_a_counted_overrun(void)
     TEST_ASSERT_EQUAL_UINT32(1u, h.write_overruns);
     TEST_ASSERT_EQUAL_UINT32(2u, h.write_deferred);
     TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+}
+
+/* D-093 amendment 4: a frame the HSEM kept waiting is dropped once strictly older than its
+ * message's gen/ cycle, never written late. */
+#define LEAN_CYCLE PLATFORM_EKF_LEAN_CYCLE_TIME_MS
+
+/* The M4 holds 0x020's HSEM from the pass where `hold_passes` steps have run (including the
+ * first, which stamps the frame), releases it and runs one more step. */
+static void hold_then_release(uint32_t hold_passes)
+{
+    hsem_host_seize(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    for (uint32_t i = 0u; i < hold_passes; i++) {
+        step();
+    }
+    hsem_host_release_as(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    step();
+}
+
+static void test_a_deferred_frame_taken_within_its_cycle_is_still_written(void)
+{
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    offer_lean(1u);
+    hold_then_release(LEAN_CYCLE); /* refused at ages 0..cycle-1, taken at age == cycle */
+    uint8_t want[MAILBOX_PAYLOAD_BYTES];
+    frame(1u, LEAN_LEN, want);
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, out, MAILBOX_PAYLOAD_BYTES);
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(LEAN_CYCLE, h.write_deferred);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_aged);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_dropped);
+}
+
+static void test_a_deferred_frame_older_than_its_cycle_is_dropped_not_written(void)
+{
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    offer_lean(1u);
+    hold_then_release(LEAN_CYCLE + 1u); /* the free HSEM is met at age cycle + 1 */
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+    step();
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out)); /* never written later either */
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_aged);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_dropped);
+    /* a newer frame is written normally and restarts the age */
+    offer_lean(2u);
+    step();
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    TEST_ASSERT_EQUAL_UINT32(1u, mailbox_health(now).write_done);
+}
+
+/* A newer offer replaces and restamps: the replaced frame's age is not inherited. */
+static void test_a_newer_offer_restamps_the_age(void)
+{
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    offer_lean(1u);
+    hsem_host_seize(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    for (uint32_t i = 0u; i < LEAN_CYCLE; i++) {
+        step();
+    }
+    offer_lean(2u); /* replaces frame 1, which was about to age */
+    for (uint32_t i = 0u; i < LEAN_CYCLE; i++) {
+        step();
+    }
+    hsem_host_release_as(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    step();
+    uint8_t want[MAILBOX_PAYLOAD_BYTES];
+    frame(2u, LEAN_LEN, want);
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, out, MAILBOX_PAYLOAD_BYTES);
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_overruns);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_aged);
+}
+
+static void test_the_age_limit_holds_across_the_ms_wrap(void)
+{
+    now = UINT32_MAX - 8u;
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    offer_lean(1u);
+    hold_then_release(LEAN_CYCLE); /* spans the wrap, age == cycle: written */
+    TEST_ASSERT_LESS_THAN_UINT32(UINT32_MAX / 2u, now);
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    offer_lean(2u);
+    hold_then_release(LEAN_CYCLE + 1u); /* age cycle + 1: dropped */
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+    const mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_aged);
+}
+
+/* End to end with the M4's real E2E check: com_send() offers nothing newer (FDCAN2 bus-off)
+ * while the M4 holds the HSEM past the cycle. The held frame is dropped; the next frame
+ * reads as WRONG_SEQUENCE on the M4 (counter step 2), never as OK with a stale payload. */
+static void test_an_aged_frame_never_reaches_the_m4_as_a_stale_step_of_one(void)
+{
+    vehicle_e2e_tx_state_t tx;
+    vehicle_e2e_rx_state_t rx;
+    vehicle_e2e_tx_init(&tx);
+    vehicle_e2e_rx_init(&rx);
+    boot_with_m4();
+    uint8_t out[MAILBOX_PAYLOAD_BYTES];
+    (void)m4_read_lean(out);
+    for (uint32_t k = 0u; k < 4u; k++) {
+        uint8_t d[MAILBOX_PAYLOAD_BYTES] = {(uint8_t)(0xA0u + k), 1u, 2u, 3u, 4u, 5u, 6u, 0u};
+        TEST_ASSERT_EQUAL(VEHICLE_E2E_OK, vehicle_e2e_protect(PLATFORM_EKF_LEAN_E2E_DATA_ID, d, LEAN_LEN, &tx));
+        TEST_ASSERT_TRUE(mailbox_offer(LEAN_ID, false, d, LEAN_LEN));
+        if (k == 3u) {
+            hold_then_release(LEAN_CYCLE + 1u); /* frame 3 ages out; nothing newer is offered */
+            TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+            step();
+            TEST_ASSERT_EQUAL(MAILBOX_READ_NONE, m4_read_lean(out));
+        } else {
+            step();
+            TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+            const vehicle_e2e_status_t st = vehicle_e2e_check(PLATFORM_EKF_LEAN_E2E_DATA_ID,
+                                                              PLATFORM_EKF_LEAN_E2E_MAX_DELTA_COUNTER, PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS,
+                                                              out, LEAN_LEN, &rx, now);
+            TEST_ASSERT_EQUAL((k == 0u) ? VEHICLE_E2E_INITIAL : VEHICLE_E2E_OK, st);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1u, mailbox_health(now).write_aged);
+    /* the sender goes on: the M4 sees the gap, within the E2E timeout */
+    uint8_t d[MAILBOX_PAYLOAD_BYTES] = {0xB0u, 1u, 2u, 3u, 4u, 5u, 6u, 0u};
+    TEST_ASSERT_EQUAL(VEHICLE_E2E_OK, vehicle_e2e_protect(PLATFORM_EKF_LEAN_E2E_DATA_ID, d, LEAN_LEN, &tx));
+    TEST_ASSERT_TRUE(mailbox_offer(LEAN_ID, false, d, LEAN_LEN));
+    step();
+    TEST_ASSERT_EQUAL(MAILBOX_READ_NEW, m4_read_lean(out));
+    TEST_ASSERT_EQUAL(VEHICLE_E2E_WRONG_SEQUENCE,
+                      vehicle_e2e_check(PLATFORM_EKF_LEAN_E2E_DATA_ID, PLATFORM_EKF_LEAN_E2E_MAX_DELTA_COUNTER,
+                                        PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS, out, LEAN_LEN, &rx, now));
 }
 
 /* E-28 (5): nothing goes into an M4 region with another layout, and a frame offered
@@ -877,6 +1019,11 @@ int main(void)
     RUN_TEST(test_a_pending_frame_is_written_in_the_same_pass_and_read_by_the_m4);
     RUN_TEST(test_a_refused_hsem_defers_to_the_next_pass);
     RUN_TEST(test_a_frame_replaced_while_pending_is_a_counted_overrun);
+    RUN_TEST(test_a_deferred_frame_taken_within_its_cycle_is_still_written);
+    RUN_TEST(test_a_deferred_frame_older_than_its_cycle_is_dropped_not_written);
+    RUN_TEST(test_a_newer_offer_restamps_the_age);
+    RUN_TEST(test_the_age_limit_holds_across_the_ms_wrap);
+    RUN_TEST(test_an_aged_frame_never_reaches_the_m4_as_a_stale_step_of_one);
     RUN_TEST(test_a_mismatched_m4_layout_gets_no_write_and_the_frame_is_dropped);
     RUN_TEST(test_a_deferred_frame_caught_by_a_mismatch_is_dropped);
     RUN_TEST(test_heartbeat_frames_offered_into_a_mismatch_are_each_dropped);

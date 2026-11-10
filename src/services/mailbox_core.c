@@ -39,6 +39,9 @@ void mailbox_pending_init(mailbox_pending_t* p)
         p->deferred = 0u;
         p->overruns = 0u;
         p->dropped = 0u;
+        p->aged = 0u;
+        p->stamped_ms = 0u;
+        p->stamped = false;
     }
 }
 
@@ -59,7 +62,34 @@ bool mailbox_pending_offer(mailbox_pending_t* p, const uint8_t* data, uint8_t le
     p->data[1] = words[1];
     p->len = len;
     p->pending = true;
+    p->stamped = false; /* a newer frame restarts the age */
     return true;
+}
+
+void mailbox_pending_stamp(mailbox_pending_t* p, uint32_t now_ms)
+{
+    if ((p != NULL) && p->pending && !p->stamped) {
+        p->stamped_ms = now_ms;
+        p->stamped = true;
+    }
+}
+
+bool mailbox_age_exceeds(uint32_t offered_ms, uint32_t now_ms, uint32_t cycle_ms)
+{
+    return (uint32_t)(now_ms - offered_ms) > cycle_ms;
+}
+
+bool mailbox_pending_aged(const mailbox_pending_t* p, uint32_t now_ms, uint32_t cycle_ms)
+{
+    return (p != NULL) && p->pending && p->stamped && mailbox_age_exceeds(p->stamped_ms, now_ms, cycle_ms);
+}
+
+void mailbox_pending_drop_aged(mailbox_pending_t* p)
+{
+    if ((p != NULL) && p->pending) {
+        mbc_sat_inc(&p->aged);
+        mailbox_pending_drop(p);
+    }
 }
 
 void mailbox_pending_defer(mailbox_pending_t* p)
