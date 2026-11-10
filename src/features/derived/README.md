@@ -72,9 +72,8 @@ Vehicle facts (wheel radius, reduction ratios, gear ratios, stoichiometric AFR, 
 | Constant | Value | Reference | Kind |
 |---|---|---|---|
 | `DERIVED_MIN_WINDOW_SAMPLES` | 2 | formulas.py:160, :417 | algorithm parameter |
-| `DERIVED_J1349_REFERENCE_PRESSURE_KPA` / `_TEMPERATURE_C` | 99, 25 | formulas.py:56-57 | algorithm parameter |
 | `DERIVED_KMH_TO_MPS`, `DERIVED_RPM_TO_RAD_PER_S`, `DERIVED_PI` | 1/3.6, 2 pi/60 | formulas.py:39-40 | unit / math |
-| `DERIVED_R_DRY_AIR`, `DERIVED_KELVIN_OFFSET`, `DERIVED_STANDARD_GRAVITY` | 287.058, 273.15, 9.80665 | formulas.py:43-47 | physics |
+| `DERIVED_KELVIN_OFFSET`, `DERIVED_STANDARD_GRAVITY` | 273.15, 9.80665 | formulas.py | physics (the dry-air gas constant 287.05 and the J1349 reference 99 kPa / 25 degC come from gen/ since defs v0.26.0 / v0.25.0) |
 | `DERIVED_MG_PER_KG`, `_G_PER_KG`, `_SECONDS_PER_MINUTE`, `_SECONDS_PER_HOUR`, `_GPS_TO_KG_PER_H`, `_PA_PER_KPA`, `_PERCENT`, `_MS_PER_S` | unit factors | formulas.py:49-52, :155, :168, :296, :342, :395 | unit |
 
 No vehicle fact is missing from gen/ for these 49 signals, so no signal is left out for a `/signal-change`; the D-103 thresholds are the generated `const.*` macros.

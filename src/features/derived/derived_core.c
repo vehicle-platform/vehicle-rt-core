@@ -349,7 +349,7 @@ static derived_flag_t did_window(const derived_ctx_t* x, uint32_t did, float sca
 static float air_density(float pressure_kpa, float temperature_c)
 {
     return (pressure_kpa * DERIVED_PA_PER_KPA) /
-           (DERIVED_R_DRY_AIR * (temperature_c + DERIVED_KELVIN_OFFSET));
+           (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * (temperature_c + DERIVED_KELVIN_OFFSET));
 }
 
 static derived_flag_t f_vehicle_accel(const derived_ctx_t* x, float* out)
@@ -654,7 +654,7 @@ static derived_flag_t f_altitude_change(const derived_ctx_t* x, float* out)
         if ((!x->c->baro_ref_set) || (p <= 0.0f) || (temperature <= 0.0f)) {
             f = DERIVED_FLAG_INVALID_INPUT;
         } else {
-            const float scale_height = (DERIVED_R_DRY_AIR * temperature) / DERIVED_STANDARD_GRAVITY;
+            const float scale_height = (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * temperature) / DERIVED_STANDARD_GRAVITY;
             *out = scale_height * logf(x->c->baro_ref / p);
         }
     }

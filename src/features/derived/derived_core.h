@@ -80,7 +80,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_PI (3.14159265f)                       /* mathematical constant */
 #define DERIVED_KMH_TO_MPS (0.27777778f)               /* 1 / 3.6, formulas.py:39 */
 #define DERIVED_RPM_TO_RAD_PER_S (0.10471976f)         /* 2 pi / 60, formulas.py:40 */
-#define DERIVED_R_DRY_AIR (287.058f)                   /* J/(kg K), formulas.py:43 */
 #define DERIVED_KELVIN_OFFSET (273.15f)                /* formulas.py:44 */
 #define DERIVED_STANDARD_GRAVITY (9.80665f)            /* formulas.py:47 */
 #define DERIVED_MG_PER_KG (1.0e6f)                     /* formulas.py:49 */
@@ -92,7 +91,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_PERCENT (100.0f)                       /* formulas.py:342 */
 #define DERIVED_MS_PER_S (1000.0f)                     /* formulas.py:168 */
 #define DERIVED_M3_PER_CM3 (1.0e-6f)                   /* cm3 -> m3, d103_windows.py */
-#define DERIVED_R_AIR_VE (287.05f)                     /* J/(kg K), d103_windows.py */
 /* A slope or a window mean needs at least this many samples: algorithm parameter,
  * provisional (D-070 item 6), formulas.py:160 and :417. */
 #define DERIVED_MIN_WINDOW_SAMPLES (2u)

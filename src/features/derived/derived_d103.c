@@ -294,7 +294,7 @@ static derived_flag_t f_theoretical_air_flow(const derived_ctx_t* x, float* out)
             }
             if (f == DERIVED_FLAG_NONE) {
                 const float density = (map * DERIVED_PA_PER_KPA) /
-                                      (DERIVED_R_AIR_VE * (temperature + DERIVED_KELVIN_OFFSET));
+                                      (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * (temperature + DERIVED_KELVIN_OFFSET));
                 const float displacement = (float)VEHICLE_CL250_ENGINE_DISPLACEMENT_CM3 * DERIVED_M3_PER_CM3;
                 *out = ((density * displacement * rpm) /
                         (DERIVED_SECONDS_PER_MINUTE * (float)VEHICLE_CL250_ENGINE_REVOLUTIONS_PER_CYCLE)) * DERIVED_G_PER_KG;
