@@ -110,6 +110,9 @@ endif()
 # SIL smoke: the host program against the simulated ECU, real time, 2 s.
 add_test(NAME sil_vehicle_rtcore_host_demo
          COMMAND vehicle_rtcore_host --duration-ms 2000 --min-responses 20 --quiet)
+# ISSUES E-14 (5): no platform frame is refused by the E2E-range check in a normal run.
+set_tests_properties(sil_vehicle_rtcore_host_demo PROPERTIES
+                     FAIL_REGULAR_EXPRESSION "[1-9][0-9]* platform refusals")
 
 # SIL (D-080): two synthetic stored DTCs: the key-on run completes (count, list, 0x04 and
 # 0x06 per DTC) and every raw answer is printed by the sink.

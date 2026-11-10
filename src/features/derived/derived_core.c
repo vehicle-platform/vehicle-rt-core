@@ -349,7 +349,7 @@ static derived_flag_t did_window(const derived_ctx_t* x, uint32_t did, float sca
 static float air_density(float pressure_kpa, float temperature_c)
 {
     return (pressure_kpa * DERIVED_PA_PER_KPA) /
-           (DERIVED_R_DRY_AIR * (temperature_c + DERIVED_KELVIN_OFFSET));
+           (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * (temperature_c + DERIVED_KELVIN_OFFSET));
 }
 
 static derived_flag_t f_vehicle_accel(const derived_ctx_t* x, float* out)
@@ -475,7 +475,7 @@ static derived_flag_t f_power_correction(const derived_ctx_t* x, float* out)
     float rho = 0.0f;
     const derived_flag_t f = derived_core_derived_value(x, VEHICLE_CL250_DERIVED_AIR_DENSITY, &rho);
     if (f == DERIVED_FLAG_NONE) {
-        const float reference = air_density(DERIVED_J1349_REFERENCE_PRESSURE_KPA, DERIVED_J1349_REFERENCE_TEMPERATURE_C);
+        const float reference = air_density(VEHICLE_CL250_J1349_REFERENCE_PRESSURE_KPA, VEHICLE_CL250_J1349_REFERENCE_TEMPERATURE_C);
         *out = reference / rho;
     }
     return f;
@@ -598,7 +598,7 @@ static derived_flag_t f_fuel_per_stroke(const derived_ctx_t* x, float* out)
             f = derived_core_did_value(x, (uint32_t)VEHICLE_CL250_IDX_ENGINE_FUEL_RATE, &rate);
             if (f == DERIVED_FLAG_NONE) {
                 const float mg_per_hour = (rate * VEHICLE_CL250_FUEL_DENSITY_KG_PER_L) * DERIVED_MG_PER_KG;
-                *out = mg_per_hour / ((rpm * DERIVED_SECONDS_PER_MINUTE) / DERIVED_REVOLUTIONS_PER_INJECTION);
+                *out = mg_per_hour / ((rpm * DERIVED_SECONDS_PER_MINUTE) / (float)VEHICLE_CL250_ENGINE_REVOLUTIONS_PER_CYCLE);
             }
         }
     }
@@ -654,7 +654,7 @@ static derived_flag_t f_altitude_change(const derived_ctx_t* x, float* out)
         if ((!x->c->baro_ref_set) || (p <= 0.0f) || (temperature <= 0.0f)) {
             f = DERIVED_FLAG_INVALID_INPUT;
         } else {
-            const float scale_height = (DERIVED_R_DRY_AIR * temperature) / DERIVED_STANDARD_GRAVITY;
+            const float scale_height = (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * temperature) / DERIVED_STANDARD_GRAVITY;
             *out = scale_height * logf(x->c->baro_ref / p);
         }
     }

@@ -5,6 +5,7 @@
 #include "hal/can_port.h"
 #include "hal/host/can_port_host.h"
 #include "services/can_if.h"
+#include "platform_e2e.h"
 #include "vehicle_cl250.h"
 
 #include <string.h>
@@ -213,6 +214,71 @@ static void test_write_goes_to_the_bound_bus_and_unbound_ports_are_closed(void)
     TEST_ASSERT_EQUAL(CAN_PORT_ERR_ARG, can_if_write(CAN_PORT_COUNT, &f));
 }
 
+/* ISSUES E-14 (5): a standard ID in an E2E-mandatory platform range (gen/ safety
+ * 0x010-0x07F, heartbeat 0x080-0x08F) goes out only through its registered dedicated buffer. */
+static void test_platform_e2e_range_needs_a_registered_dedicated_buffer(void)
+{
+    const uint32_t ids[] = {PLATFORM_E2E_RANGE_SAFETY_FIRST_ID, 0x050u, PLATFORM_E2E_RANGE_SAFETY_LAST_ID,
+                            PLATFORM_E2E_RANGE_HEARTBEAT_FIRST_ID, PLATFORM_E2E_RANGE_HEARTBEAT_LAST_ID};
+    can_frame_t f;
+    memset(&f, 0, sizeof f);
+    f.dlc = 8u;
+    for (uint32_t i = 0u; i < (sizeof ids / sizeof ids[0]); i++) {
+        f.id = ids[i];
+        TEST_ASSERT_FALSE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+        TEST_ASSERT_EQUAL(CAN_PORT_ERR_REFUSED, can_if_write(CAN_PORT_PLATFORM, &f));
+    }
+    TEST_ASSERT_EQUAL_UINT32(5u, can_if_tx_refused_count(CAN_PORT_PLATFORM));
+    can_frame_t got;
+    TEST_ASSERT_NOT_EQUAL(CAN_PORT_OK, vbus_recv(&bus, node_peer, &got)); /* nothing on the bus */
+
+    /* just outside the ranges, and an extended frame, are not E2E-range frames */
+    const uint32_t outside[] = {PLATFORM_E2E_RANGE_SAFETY_FIRST_ID - 1u, PLATFORM_E2E_RANGE_HEARTBEAT_LAST_ID + 1u};
+    for (uint32_t i = 0u; i < 2u; i++) {
+        f.id = outside[i];
+        TEST_ASSERT_TRUE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    }
+    f.id = 0x050u;
+    f.extended = true;
+    TEST_ASSERT_TRUE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+
+    /* registered: allowed, and the frame reaches the bus */
+    f.extended = false;
+    TEST_ASSERT_EQUAL(CAN_IF_OK, can_if_register_tx_dedicated(CAN_PORT_PLATFORM, 0x050u, false));
+    TEST_ASSERT_EQUAL(CAN_PORT_OK, can_if_apply_filters(CAN_PORT_PLATFORM));
+    TEST_ASSERT_TRUE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    TEST_ASSERT_EQUAL(CAN_PORT_OK, can_if_write(CAN_PORT_PLATFORM, &f));
+    TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_recv(&bus, node_peer, &got));
+    TEST_ASSERT_EQUAL_UINT32(0x050u, got.id);
+    /* only that ID: a neighbour stays refused */
+    f.id = 0x051u;
+    TEST_ASSERT_FALSE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    TEST_ASSERT_EQUAL_UINT32(5u, can_if_tx_refused_count(CAN_PORT_PLATFORM));
+    /* platform refusals never move the vehicle guard's count (the uds_client GUARD latch) */
+    TEST_ASSERT_EQUAL_UINT32(0u, can_if_tx_refused_count(CAN_PORT_VEHICLE));
+}
+
+/* safety-reviewer MINOR-1 / NIT-3: registered is not enough before the port took the
+ * buffers, and an extended registration does not open the standard ID of the same number. */
+static void test_platform_e2e_range_needs_the_sealed_port_and_the_same_format(void)
+{
+    can_frame_t f;
+    memset(&f, 0, sizeof f);
+    f.id = 0x050u;
+    f.dlc = 8u;
+    TEST_ASSERT_EQUAL(CAN_IF_OK, can_if_register_tx_dedicated(CAN_PORT_PLATFORM, 0x050u, false));
+    TEST_ASSERT_EQUAL(CAN_IF_OK, can_if_register_tx_dedicated(CAN_PORT_PLATFORM, 0x060u, true));
+    TEST_ASSERT_FALSE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f)); /* not sealed yet */
+    TEST_ASSERT_EQUAL(CAN_PORT_ERR_REFUSED, can_if_write(CAN_PORT_PLATFORM, &f));
+    TEST_ASSERT_EQUAL(CAN_PORT_OK, can_if_apply_filters(CAN_PORT_PLATFORM));
+    TEST_ASSERT_TRUE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    f.id = 0x060u; /* registered as extended only */
+    TEST_ASSERT_FALSE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    f.extended = true;
+    TEST_ASSERT_TRUE(can_if_tx_allowed(CAN_PORT_PLATFORM, &f));
+    TEST_ASSERT_EQUAL_UINT32(1u, can_if_tx_refused_count(CAN_PORT_PLATFORM));
+}
+
 /* Dedicated TX buffers (D-056). */
 static void test_register_tx_dedicated_only_on_the_platform_port_until_sealed(void)
 {
@@ -322,6 +388,8 @@ int main(void)
     RUN_TEST(test_dispatch_reads_at_most_max_frames);
     RUN_TEST(test_vehicle_guard_passes_only_allowed_single_frames_on_the_request_id);
     RUN_TEST(test_write_goes_to_the_bound_bus_and_unbound_ports_are_closed);
+    RUN_TEST(test_platform_e2e_range_needs_a_registered_dedicated_buffer);
+    RUN_TEST(test_platform_e2e_range_needs_the_sealed_port_and_the_same_format);
     RUN_TEST(test_register_tx_dedicated_only_on_the_platform_port_until_sealed);
     RUN_TEST(test_a_stalled_dedicated_frame_is_replaced_and_no_stale_frame_goes_out_late);
     RUN_TEST(test_dedicated_buffers_leave_the_vehicle_port_and_its_guard_unchanged);

@@ -173,9 +173,9 @@ static void test_engine_flags_and_residuals(void)
     put(VEHICLE_CL250_IDX_INTAKE_MAP, 100.0f, 0u);
     put(VEHICLE_CL250_IDX_INTAKE_AIR_TEMP, 25.0f, 0u);
     /* full-cylinder flow, g/s: rho = p / (R T), times displacement and rpm / 120 (four-stroke). */
-    const float rho = (100.0f * DERIVED_PA_PER_KPA) / (DERIVED_R_AIR_VE * (25.0f + DERIVED_KELVIN_OFFSET));
+    const float rho = (100.0f * DERIVED_PA_PER_KPA) / (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * (25.0f + DERIVED_KELVIN_OFFSET));
     const float theoretical_gps = rho * ((float)VEHICLE_CL250_ENGINE_DISPLACEMENT_CM3 * DERIVED_M3_PER_CM3) *
-                                  (3000.0f / DERIVED_INTAKE_STROKES_PER_MIN) * DERIVED_G_PER_KG;
+                                  (3000.0f / (DERIVED_SECONDS_PER_MINUTE * (float)VEHICLE_CL250_ENGINE_REVOLUTIONS_PER_CYCLE)) * DERIVED_G_PER_KG;
     put(VEHICLE_CL250_IDX_MAF_RATE, theoretical_gps, 0u);
     step(0u);
     valid(VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY, 100.0f, 0.1f);

@@ -13,7 +13,7 @@ cd vehicle-server && uv run vehicle-server golden --out ../vehicle-rt-core/tests
   (defs `resolution` / 2). Scenarios: `idle_warmup`, `accel_gears`, `stale_gap`, `edge_values`,
   `start_idle_refuel`, `health_windows` (key on, crank, warm idle, cruise and post stop: all five D-079 windows open once).
 - Signals: class A with a formula in the reference, `ready_rt_core`, DID inputs only (49).
-- Defs version: generated from **vehicle-defs v0.24.0** (the banner of every header names the
+- Defs version: generated from **vehicle-defs v0.26.0** (the banner of every header names the
   version it came from). The expected outputs use that version's derived `stale_after_ms`
   (the age limit of a derived input) and, for a non-event DID input, that DID's own
   `stale_after_ms` of the gen vehicle table (D-070), so the features/derived test that

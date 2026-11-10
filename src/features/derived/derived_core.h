@@ -46,30 +46,43 @@ extern "C" {
 #endif
 
 /*
- * Compile-time sizing (static RAM). Capacity = window_ms / poll period + 2 samples of the
- * DID (or of the derived producer). gen/ does not export window or period as constant
- * expressions, so the numbers below are checked against the gen/ table at init: a signal
- * whose window needs more is NOT_COMPUTED (DERIVED_NC_SIZING), never silently truncated.
- * The caps derive from the gen/ table fields `poll_period_ms` (vehicle_cl250_dids[]; for the
- * accel ring `period_ms` of the producer) and `window_ms` (vehicle_cl250_derived[]) and are
- * checked against them at init (SIZING). Values for the pinned defs: SPEED 60000/110+2 = 547, FUEL_RATE 60000/2000+2 = 32,
- * COOLANT 60000/800+2 = 77, OIL 60000/5000+2 = 14, VEHICLE_ACCEL output 440/110+2 = 6.
+ * Compile-time sizing (static RAM). Capacity = window / sample period + 2 samples of the DID
+ * (or of the derived producer), computed from the gen/ compile-time copies of the table data
+ * (VEHICLE_CL250_POLL_MS_*, _PERIOD_MS_*, _WINDOW_MS_*, _MAX_DURATION_MS_*; defs v0.26.0), so
+ * no capacity is hand-derived (ISSUES E-30 (10)). init still checks every window against the
+ * runtime tables (SIZING): a signal whose window needs more is NOT_COMPUTED
+ * (DERIVED_NC_SIZING), never silently truncated.
  */
-#define DERIVED_WIN_SPEED_CAP (548u)
-#define DERIVED_WIN_FUEL_RATE_CAP (32u)
-#define DERIVED_WIN_COOLANT_CAP (77u)
-#define DERIVED_WIN_OIL_CAP (14u)
-#define DERIVED_WIN_ACCEL_CAP (8u)
-/* D-103 windows: largest window / poll + 2. ENGINE_SPEED poll 110 ms: idle drift 60 s
- * = 545 + 2 = 547; BATTERY_VOLTAGE poll 800 ms: charging plateau 10 s = 12 + 2 = 14;
- * FUEL_LEVEL poll 5000 ms: fuel level filtered 30 s = 6 + 2 = 8; VEHICLE_ACCEL period
- * 110 ms: the 30 s acceleration history = 272 + 2 = 274. */
-#define DERIVED_WIN_RPM_HIST_CAP (548u)
-#define DERIVED_WIN_BATT_HIST_CAP (15u)
-#define DERIVED_WIN_FUEL_HIST_CAP (8u)
-#define DERIVED_WIN_ACCEL_HIST_CAP (277u)
-_Static_assert(DERIVED_WIN_RPM_HIST_CAP >= ((60u * 1000u) / 110u) + 2u, "idle drift window");
-_Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel filter window");
+#define DERIVED_HIST_CAP(window_ms, period_ms) ((((uint32_t)(window_ms)) / ((uint32_t)(period_ms))) + 2u)
+#define DERIVED_CAP_MAX(a, b) (((a) > (b)) ? (a) : (b))
+/* VEHICLE_SPEED: vehicle_accel's slope window and the fuel-consumption average. */
+#define DERIVED_WIN_SPEED_CAP                                                                         \
+    DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_VEHICLE_ACCEL, VEHICLE_CL250_POLL_MS_VEHICLE_SPEED), \
+                    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_CONSUMPTION_AVG,                    \
+                                     VEHICLE_CL250_POLL_MS_VEHICLE_SPEED))
+#define DERIVED_WIN_FUEL_RATE_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_CONSUMPTION_AVG, VEHICLE_CL250_POLL_MS_ENGINE_FUEL_RATE)
+#define DERIVED_WIN_COOLANT_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_COOLANT_RATE, VEHICLE_CL250_POLL_MS_COOLANT_TEMP)
+#define DERIVED_WIN_OIL_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_OIL_TEMP_RATE, VEHICLE_CL250_POLL_MS_ENGINE_OIL_TEMP)
+/* vehicle_accel outputs for vehicle_jerk's window. */
+#define DERIVED_WIN_ACCEL_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_VEHICLE_JERK, VEHICLE_CL250_PERIOD_MS_VEHICLE_ACCEL)
+/* D-103 histories. ENGINE_SPEED: the charging plateau, idle RPM std / drift and the D-079 W3
+ * warm-idle instance (its RPM statistics read this history). */
+#define DERIVED_WIN_RPM_HIST_CAP                                                                      \
+    DERIVED_CAP_MAX(                                                                                  \
+        DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_CHARGING_PLATEAU_VOLTAGE,            \
+                                         VEHICLE_CL250_POLL_MS_ENGINE_SPEED),                         \
+                        DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_IDLE_RPM_STD, VEHICLE_CL250_POLL_MS_ENGINE_SPEED)), \
+        DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_IDLE_RPM_DRIFT, VEHICLE_CL250_POLL_MS_ENGINE_SPEED), \
+                        DERIVED_HIST_CAP(VEHICLE_CL250_MAX_DURATION_MS_W3_WARM_IDLE,                  \
+                                         VEHICLE_CL250_POLL_MS_ENGINE_SPEED)))
+#define DERIVED_WIN_BATT_HIST_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_CHARGING_PLATEAU_VOLTAGE, VEHICLE_CL250_POLL_MS_BATTERY_VOLTAGE)
+#define DERIVED_WIN_FUEL_HIST_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_LEVEL_FILTERED, VEHICLE_CL250_POLL_MS_FUEL_LEVEL)
+/* vehicle_accel outputs over fuel_level_filtered's window. */
+#define DERIVED_WIN_ACCEL_HIST_CAP                                                                    \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_LEVEL_FILTERED, VEHICLE_CL250_PERIOD_MS_VEHICLE_ACCEL)
 
 /*
  * Algorithm parameters and unit conversions ported from the reference
@@ -80,25 +93,17 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_PI (3.14159265f)                       /* mathematical constant */
 #define DERIVED_KMH_TO_MPS (0.27777778f)               /* 1 / 3.6, formulas.py:39 */
 #define DERIVED_RPM_TO_RAD_PER_S (0.10471976f)         /* 2 pi / 60, formulas.py:40 */
-#define DERIVED_R_DRY_AIR (287.058f)                   /* J/(kg K), formulas.py:43 */
 #define DERIVED_KELVIN_OFFSET (273.15f)                /* formulas.py:44 */
 #define DERIVED_STANDARD_GRAVITY (9.80665f)            /* formulas.py:47 */
 #define DERIVED_MG_PER_KG (1.0e6f)                     /* formulas.py:49 */
 #define DERIVED_G_PER_KG (1000.0f)                     /* formulas.py:50 */
 #define DERIVED_SECONDS_PER_MINUTE (60.0f)             /* formulas.py:51 */
-#define DERIVED_REVOLUTIONS_PER_INJECTION (2.0f)       /* four-stroke, formulas.py:54 */
 #define DERIVED_GPS_TO_KG_PER_H (3.6f)                 /* g/s -> kg/h, formulas.py:395 */
 #define DERIVED_SECONDS_PER_HOUR (3600.0f)             /* km/h -> km/s, formulas.py:296 */
 #define DERIVED_PA_PER_KPA (1000.0f)                   /* formulas.py:155 */
 #define DERIVED_PERCENT (100.0f)                       /* formulas.py:342 */
 #define DERIVED_MS_PER_S (1000.0f)                     /* formulas.py:168 */
 #define DERIVED_M3_PER_CM3 (1.0e-6f)                   /* cm3 -> m3, d103_windows.py */
-#define DERIVED_R_AIR_VE (287.05f)                     /* J/(kg K), d103_windows.py */
-#define DERIVED_INTAKE_STROKES_PER_MIN (120.0f)        /* four-stroke: rpm / 120 per second */
-/* SAE J1349 reference conditions of the power correction: algorithm parameters, provisional
- * (D-070 item 6), formulas.py:56-57. */
-#define DERIVED_J1349_REFERENCE_PRESSURE_KPA (99.0f)
-#define DERIVED_J1349_REFERENCE_TEMPERATURE_C (25.0f)
 /* A slope or a window mean needs at least this many samples: algorithm parameter,
  * provisional (D-070 item 6), formulas.py:160 and :417. */
 #define DERIVED_MIN_WINDOW_SAMPLES (2u)

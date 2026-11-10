@@ -332,7 +332,7 @@ static void test_waiting_row_capacities_cover_the_gen_table(void)
         uint32_t sig;
         uint32_t need;
     } want[] = {
-        {VEHICLE_CL250_DERIVED_HEAT_SOAK_DELTA, 139u}, {VEHICLE_CL250_DERIVED_COLD_ENGINE_ABUSE, 139u},
+        {VEHICLE_CL250_DERIVED_HEAT_SOAK_DELTA, 139u}, {VEHICLE_CL250_DERIVED_COLD_ENGINE_ABUSE, 57u},
         {VEHICLE_CL250_DERIVED_OVER_REV, 5u},          {VEHICLE_CL250_DERIVED_LUGGING, 57u},
         {VEHICLE_CL250_DERIVED_IDLE_RPM_STD, 24u},     {VEHICLE_CL250_DERIVED_IDLE_RPM_DRIFT, 24u},
     };

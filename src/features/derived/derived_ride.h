@@ -55,14 +55,14 @@ extern "C" {
  * the DERIVED_WIN_*_CAP): an older row is past every input's stale limit, which makes it an
  * invalid row in the reference too. gen/ exports period and stale only as table data, so
  * derived_ride_tail_fits() checks the caps against it at init (a too small cap makes the
- * signal NOT_COMPUTED, DERIVED_NC_SIZING). Values for defs v0.24.0:
+ * signal NOT_COMPUTED, DERIVED_NC_SIZING). Values for defs v0.26.0:
  *   heat_soak_delta     intake / ambient 15000 ms / 110 ms -> 137 + 2 = 139
- *   cold_engine_abuse   oil temp 15000 ms / 110 ms         -> 139
+ *   cold_engine_abuse   engine load 6000 ms / 110 ms      -> 57 (no oil temp input since v0.26.0)
  *   over_rev            rpm 330 ms / 110 ms                -> 3 + 2 = 5
  *   lugging             engine load 6000 ms / 110 ms      -> 55 + 2 = 57 (gear_estimate: 330 ms)
  *   idle_rpm_std/drift  coolant 2400 ms / 110 ms           -> 22 + 2 = 24 */
 #define DERIVED_RIDE_TAIL_CAP_HEAT_SOAK (139u)
-#define DERIVED_RIDE_TAIL_CAP_COLD_ABUSE (139u)
+#define DERIVED_RIDE_TAIL_CAP_COLD_ABUSE (57u)
 #define DERIVED_RIDE_TAIL_CAP_OVER_REV (5u)
 #define DERIVED_RIDE_TAIL_CAP_LUGGING (57u)
 #define DERIVED_RIDE_TAIL_CAP_IDLE_STD (24u)

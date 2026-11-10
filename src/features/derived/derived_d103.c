@@ -67,13 +67,6 @@ static bool ring_lookup_accel(const derived_core_t* c, uint32_t at, uint32_t lim
 
 /* ---- D-103 states, residuals and windows ---------------------------------------------------- */
 
-#define D103_CLUTCH_ENGAGED (0.0f)
-#define D103_CLUTCH_DISENGAGED (1.0f)
-#define D103_CLUTCH_SLIPPING (2.0f)
-#define D103_NEUTRAL_GEARED (0.0f)
-#define D103_NEUTRAL_NEUTRAL (1.0f)
-#define D103_NEUTRAL_COASTING (2.0f)
-
 static derived_flag_t require_moving(const derived_ctx_t* x, float* speed)
 {
     derived_flag_t f = derived_core_did_value(x, (uint32_t)VEHICLE_CL250_IDX_VEHICLE_SPEED, speed);
@@ -103,17 +96,17 @@ static derived_flag_t f_clutch_state(const derived_ctx_t* x, float* out)
             const float nearest = derived_gear_nearest_ratio(measured);
             const float relative = (measured / nearest) - 1.0f;
             if (fabsf(relative) <= VEHICLE_CL250_DERIVED_GEAR_RATIO_TOLERANCE) {
-                *out = D103_CLUTCH_ENGAGED;
+                *out = VEHICLE_CL250_DERIVED_VALUE_CLUTCH_STATE_ENGAGED;
             } else if (relative > VEHICLE_CL250_DERIVED_GEAR_RATIO_TOLERANCE) {
                 float throttle = 0.0f;
                 f = derived_core_did_value(x, (uint32_t)VEHICLE_CL250_IDX_THROTTLE_POS, &throttle);
                 if (f == DERIVED_FLAG_NONE) {
                     *out = (throttle > VEHICLE_CL250_DERIVED_THROTTLE_LOAD_MIN_PCT)
-                               ? D103_CLUTCH_SLIPPING
-                               : D103_CLUTCH_DISENGAGED;
+                               ? VEHICLE_CL250_DERIVED_VALUE_CLUTCH_STATE_SLIPPING
+                               : VEHICLE_CL250_DERIVED_VALUE_CLUTCH_STATE_DISENGAGED;
                 }
             } else {
-                *out = D103_CLUTCH_DISENGAGED;
+                *out = VEHICLE_CL250_DERIVED_VALUE_CLUTCH_STATE_DISENGAGED;
             }
         }
     }
@@ -125,7 +118,7 @@ static derived_flag_t f_clutch_slip_ratio(const derived_ctx_t* x, float* out)
     float gear_value = 0.0f;
     derived_flag_t f = derived_core_derived_value(x, VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, &gear_value);
     if (f == DERIVED_FLAG_NONE) {
-        if (gear_value < 1.0f) {
+        if (gear_value <= VEHICLE_CL250_DERIVED_VALUE_GEAR_ESTIMATE_NO_GEAR) {
             f = DERIVED_FLAG_NO_GEAR;
         } else {
             float measured = 0.0f;
@@ -150,15 +143,15 @@ static derived_flag_t f_neutral_coasting(const derived_ctx_t* x, float* out)
             const derived_flag_t gear_flag = derived_core_derived_value(x, VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, &gear);
             if ((gear_flag == DERIVED_FLAG_STALE_INPUT) || (gear_flag == DERIVED_FLAG_MATH_ERROR)) {
                 f = gear_flag;
-            } else if ((gear_flag == DERIVED_FLAG_INVALID_INPUT) || (gear < 1.0f)) {
-                *out = D103_NEUTRAL_NEUTRAL;
+            } else if ((gear_flag == DERIVED_FLAG_INVALID_INPUT) || (gear <= VEHICLE_CL250_DERIVED_VALUE_GEAR_ESTIMATE_NO_GEAR)) {
+                *out = VEHICLE_CL250_DERIVED_VALUE_NEUTRAL_COASTING_STATE_NEUTRAL;
             } else {
                 float throttle = 0.0f;
                 f = derived_core_did_value(x, (uint32_t)VEHICLE_CL250_IDX_THROTTLE_POS, &throttle);
                 if (f == DERIVED_FLAG_NONE) {
                     *out = (throttle <= VEHICLE_CL250_DERIVED_THROTTLE_CLOSED_MAX_PCT)
-                               ? D103_NEUTRAL_COASTING
-                               : D103_NEUTRAL_GEARED;
+                               ? VEHICLE_CL250_DERIVED_VALUE_NEUTRAL_COASTING_STATE_COASTING
+                               : VEHICLE_CL250_DERIVED_VALUE_NEUTRAL_COASTING_STATE_DRIVEN;
                 }
             }
         }
@@ -301,9 +294,10 @@ static derived_flag_t f_theoretical_air_flow(const derived_ctx_t* x, float* out)
             }
             if (f == DERIVED_FLAG_NONE) {
                 const float density = (map * DERIVED_PA_PER_KPA) /
-                                      (DERIVED_R_AIR_VE * (temperature + DERIVED_KELVIN_OFFSET));
+                                      (VEHICLE_CL250_DRY_AIR_GAS_CONSTANT_J_PER_KG_K * (temperature + DERIVED_KELVIN_OFFSET));
                 const float displacement = (float)VEHICLE_CL250_ENGINE_DISPLACEMENT_CM3 * DERIVED_M3_PER_CM3;
-                *out = ((density * displacement * rpm) / DERIVED_INTAKE_STROKES_PER_MIN) * DERIVED_G_PER_KG;
+                *out = ((density * displacement * rpm) /
+                        (DERIVED_SECONDS_PER_MINUTE * (float)VEHICLE_CL250_ENGINE_REVOLUTIONS_PER_CYCLE)) * DERIVED_G_PER_KG;
             }
         }
     }

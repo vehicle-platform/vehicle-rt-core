@@ -135,7 +135,7 @@ static bool gear_near_threshold(void)
     const derived_out_t* const r = derived_core_out(&core, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED);
     for (uint32_t i = 0u; i < 6u; i++) {
         const float dev = fabsf((r->unranged / ratios[i]) - 1.0f);
-        if (fabsf(dev - DERIVED_GEAR_MATCH_TOLERANCE) < 1.0e-3f) {
+        if (fabsf(dev - VEHICLE_CL250_DERIVED_GEAR_MATCH_TOLERANCE) < 1.0e-3f) {
             return true;
         }
     }
@@ -528,7 +528,7 @@ static uint32_t gen_fingerprint(void)
     return fnv(h, constants, sizeof constants);
 }
 
-#define GEN_FINGERPRINT (0x4184CA10u)
+#define GEN_FINGERPRINT (0xB687D89Au)
 
 static void test_vectors_match_the_pinned_gen_table(void)
 {
@@ -588,15 +588,15 @@ static void test_air_and_altitude(void)
     touch_all(5000u);
     put(VEHICLE_CL250_IDX_BAROMETRIC_PRESSURE, 99.0f, 5000u);
     derived_core_step(&core, 5000u, in);
-    /* density of dry air at 99 kPa and 25 degC: 99000 / (287.058 * 298.15) */
-    assert_valid(VEHICLE_CL250_DERIVED_AIR_DENSITY, 1.156727f, 1.0e-4f);
+    /* density of dry air at 99 kPa and 25 degC: 99000 / (287.05 * 298.15), the gen/ gas constant */
+    assert_valid(VEHICLE_CL250_DERIVED_AIR_DENSITY, 1.156759f, 1.0e-4f);
     assert_valid(VEHICLE_CL250_DERIVED_POWER_CORRECTION_FACTOR, 1.0f, 1.0e-4f); /* the J1349 reference */
     touch_all(10000u);
     put(VEHICLE_CL250_IDX_BAROMETRIC_PRESSURE, 98.0f, 10000u);
     put(VEHICLE_CL250_IDX_INTAKE_AIR_TEMP, 20.0f, 10000u);
     derived_core_step(&core, 10000u, in);
-    /* (287.058 * 293.15 / 9.80665) * ln(99 / 98) */
-    assert_valid(VEHICLE_CL250_DERIVED_ALTITUDE_CHANGE, 87.1177f, 0.01f);
+    /* (287.05 * 293.15 / 9.80665) * ln(99 / 98) */
+    assert_valid(VEHICLE_CL250_DERIVED_ALTITUDE_CHANGE, 87.1153f, 0.01f);
 }
 
 static void test_fuel_and_residuals(void)

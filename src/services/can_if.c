@@ -1,6 +1,7 @@
 #include "services/can_if.h"
 
 #include "hal/can_port.h"
+#include "platform_e2e.h"
 #include "platform_uds.h"
 #include "services/can_sm.h"
 #include "vehicle_cl250.h"
@@ -140,6 +141,20 @@ uint32_t can_if_dispatch(can_port_id_t port, uint32_t max_frames)
     return n;
 }
 
+/* ISSUES E-14 (5): every frame rt-core sends with a standard ID in an E2E-mandatory
+ * platform range (gen/ platform_e2e_id_mandatory(): safety 0x010-0x07F, heartbeat
+ * 0x080-0x08F) comes from its gen/ E2E sender (or the mailbox forward of an M4 frame) on a
+ * registered dedicated TX buffer (D-056); anything else there would be an unprotected frame
+ * in the safety range, or an E2E frame in the Tx FIFO. */
+static bool tx_dedicated_registered(uint32_t id, bool extended)
+{
+    bool found = false;
+    for (uint32_t i = 0u; (i < tx_dedicated_count) && !found; i++) {
+        found = (tx_dedicated[i].id == id) && (tx_dedicated[i].extended == extended);
+    }
+    return found;
+}
+
 bool can_if_tx_allowed(can_port_id_t port, const can_frame_t* frame)
 {
     /* The CL250 request ID decides the frame format of the tester (29-bit, D-019). */
@@ -147,6 +162,13 @@ bool can_if_tx_allowed(can_port_id_t port, const can_frame_t* frame)
 
     if (!port_ok(port) || !can_frame_valid(frame)) {
         return false;
+    }
+    if (port == CAN_PORT_PLATFORM) {
+        /* An E2E-range standard ID only through its registered dedicated buffer, and only
+         * once the port took the buffers (sealed by can_if_apply_filters(); safety-reviewer
+         * MINOR-1: before that the HAL would route it to the Tx FIFO). */
+        return !platform_e2e_id_mandatory(frame->id, frame->extended) ||
+               (sealed[CAN_PORT_PLATFORM] && tx_dedicated_registered(frame->id, false));
     }
     if (port != CAN_PORT_VEHICLE) {
         return true;
