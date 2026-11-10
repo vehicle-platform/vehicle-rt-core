@@ -176,10 +176,15 @@ typedef struct {
     bool slow;        /* last answer came more than poll_period_ms after its stamp (D-051) */
     bool unanswered;  /* a timed-out read is unanswered: unanswered_ms is the stamp (D-051) */
     bool answered;    /* a positive answer in this epoch: the stop rule no longer applies */
+    bool nrc_last;    /* the last read ended with a negative response other than 0x78; a
+                         positive answer clears it (D-104 data_quality_mask) */
 } uds_client_did_state_t;
 
-_Static_assert(sizeof(uds_client_did_state_t) <= 24u,
-               "the per-DID state must stay 24 B with 1 B and with 4 B enums");
+/* 12 B of uint32_t + enum + 3 x uint8_t + 6 x bool: 22 B with a 1 B enum (padded to 24, so no
+ * growth on the target with short enums) and 25 B with a 4 B enum (padded to 28, host).
+ * D-104 added nrc_last, the sixth bool; the limit rose from 24 to 28 only for that. */
+_Static_assert(sizeof(uds_client_did_state_t) <= 28u,
+               "the per-DID state must stay 28 B with 1 B and with 4 B enums");
 
 /* Diagnostic counters (saturating). */
 typedef struct {
@@ -256,6 +261,7 @@ typedef struct {
     bool epoch_open;          /* D-075 item 1: a stop epoch is running (a confirmation armed it) */
     uint16_t epoch_counter;   /* D-087 item 2: bumped where an epoch opens; wraps */
 
+    uint32_t step_gap_window_ms; /* D-104: longest poll gap since the last take (0 after it) */
     uint32_t last_poll_ms;    /* the step gap check (D-053) */
     bool polled;              /* last_poll_ms is set */
 
@@ -357,6 +363,15 @@ bool uds_client_core_did_stopped(const uds_client_core_t* c, uint32_t idx);
 
 /* Why DID index idx is stopped; UDS_CLIENT_STOP_NONE when it is not (or idx is out of range). */
 uds_client_stop_reason_t uds_client_core_did_stop_reason(const uds_client_core_t* c, uint32_t idx);
+
+/* D-104: true when DID index idx's last read ended with a negative response other than
+ * NRC 0x78 and no positive answer came since (false for an index out of range). Stopped and
+ * skipped are reported by the two getters above and are independent of this flag. */
+bool uds_client_core_did_last_nrc(const uds_client_core_t* c, uint32_t idx);
+
+/* D-104: the longest poll gap (D-053) since the previous take, then clears it. The since-init
+ * maximum stays in stats.step_gap_max_ms. Pure; the caller owns the window. */
+uint32_t uds_client_core_take_step_gap_window_ms(uds_client_core_t* c);
 
 /* Pending request kind (UDS_CLIENT_REQ_NONE when the slot is free). */
 uds_client_req_kind_t uds_client_core_pending(const uds_client_core_t* c);

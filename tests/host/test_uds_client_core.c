@@ -4891,6 +4891,113 @@ static void test_D080_a_0x19_request_fits_the_request_buffer(void)
 }
 
 
+/* ------------------------------------------------------------------------- */
+/* D-104: nrc_last and the step-gap window (data_quality_mask inputs)         */
+/* ------------------------------------------------------------------------- */
+
+/* Polls from t until a DID read goes out; returns its time (the read is pending). */
+static uint32_t next_read_from(uint32_t t)
+{
+    for (uint32_t i = 0u; i < 2000u; i++) {
+        if (poll_at(t + i) == K_READ) {
+            return t + i;
+        }
+    }
+    TEST_FAIL_MESSAGE("no read went out");
+    return 0u;
+}
+
+static void test_d104_nrc_0x78_never_sets_nrc_last(void)
+{
+    bring_up(0u);
+    const uint32_t t = next_read_from(0u);
+    const uint32_t idx = req_idx();
+    nrc(t + 1u, UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_NRC_RESPONSE_PENDING);
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
+    TEST_ASSERT_EQUAL_UINT32(1u, stats()->response_pending);
+    TEST_ASSERT_TRUE(answer_read(t + 2u, idx, 1u)); /* the real answer follows */
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
+}
+
+static void test_d104_another_nrc_sets_it_and_a_positive_answer_clears_it(void)
+{
+    bring_up(0u);
+    const uint32_t t = next_read_from(0u);
+    const uint32_t idx = req_idx();
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
+    nrc(t + 1u, UDS_SID_READ_DATA_BY_IDENTIFIER, 0x22u);
+    TEST_ASSERT_TRUE(uds_client_core_did_last_nrc(&c, idx));
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        if (i != idx) {
+            TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, i)); /* only this DID */
+        }
+    }
+    /* the next read of it is answered positively: cleared */
+    uint32_t t2 = t + 2u;
+    for (;; t2++) {
+        if ((poll_at(t2) == K_READ) && (req_idx() == idx)) {
+            break;
+        }
+        TEST_ASSERT_LESS_THAN_UINT32(5000u, t2);
+    }
+    TEST_ASSERT_TRUE(uds_client_core_did_last_nrc(&c, idx)); /* kept until the answer */
+    TEST_ASSERT_TRUE(answer_read(t2 + 1u, idx, 1u));
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
+}
+
+static void test_d104_an_nrc_after_a_0x78_sets_it(void)
+{
+    bring_up(0u);
+    const uint32_t t = next_read_from(0u);
+    const uint32_t idx = req_idx();
+    nrc(t + 1u, UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_NRC_RESPONSE_PENDING);
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
+    nrc(t + 2u, UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_NRC_REQUEST_OUT_OF_RANGE);
+    TEST_ASSERT_TRUE(uds_client_core_did_last_nrc(&c, idx));
+}
+
+static void test_d104_stopped_and_skipped_are_still_reported_beside_nrc_last(void)
+{
+    const uint32_t u = first_unverified();
+    const uint32_t period = vehicle_cl250_dids[u].poll_period_ms;
+    bring_up(0u);
+    did_mode[u] = M_NRC31;
+    drive(0u, (2u * period) + 1u);
+    TEST_ASSERT_TRUE(uds_client_core_did_stopped(&c, u));
+    TEST_ASSERT_TRUE(uds_client_core_did_last_nrc(&c, u));
+    /* a verified DID that stops answering is skipped, and that is not an NRC */
+    setUp();
+    const uint32_t v = VEHICLE_CL250_IDX_VEHICLE_SPEED;
+    bring_up(0u);
+    silent_mask = did_bit(v);
+    uint32_t t = 0u;
+    while (!uds_client_core_did_skipped(&c, v, t) && (t < 20000u)) {
+        drive(t, t + 1u);
+        t++;
+    }
+    TEST_ASSERT_TRUE(uds_client_core_did_skipped(&c, v, t));
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, v));
+    /* out of range and NULL are false */
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, VEHICLE_CL250_DID_COUNT));
+    TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(NULL, 0u));
+}
+
+static void test_d104_step_gap_window_takes_the_largest_gap_and_clears(void)
+{
+    uds_client_core_init(&c, HOLD_MS);
+    TEST_ASSERT_EQUAL_UINT32(0u, uds_client_core_take_step_gap_window_ms(&c));
+    (void)poll_at(0u);
+    (void)poll_at(10u);
+    (void)poll_at(60u); /* gap 50 */
+    (void)poll_at(70u);
+    TEST_ASSERT_EQUAL_UINT32(50u, uds_client_core_take_step_gap_window_ms(&c));
+    TEST_ASSERT_EQUAL_UINT32(0u, uds_client_core_take_step_gap_window_ms(&c)); /* cleared */
+    (void)poll_at(75u); /* gap 5 only: the window restarts, no 50 carried */
+    TEST_ASSERT_EQUAL_UINT32(5u, uds_client_core_take_step_gap_window_ms(&c));
+    TEST_ASSERT_EQUAL_UINT32(50u, stats()->step_gap_max_ms); /* since init, untouched */
+    TEST_ASSERT_EQUAL_UINT32(0u, uds_client_core_take_step_gap_window_ms(NULL));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -5055,5 +5162,10 @@ int main(void)
     RUN_TEST(test_D080_a_positive_0x19_answer_that_does_not_match_is_ignored_and_counted);
     RUN_TEST(test_D080_a_latched_core_sends_no_0x19_and_the_getters_tolerate_null);
     RUN_TEST(test_D080_a_0x19_request_fits_the_request_buffer);
+    RUN_TEST(test_d104_nrc_0x78_never_sets_nrc_last);
+    RUN_TEST(test_d104_another_nrc_sets_it_and_a_positive_answer_clears_it);
+    RUN_TEST(test_d104_an_nrc_after_a_0x78_sets_it);
+    RUN_TEST(test_d104_stopped_and_skipped_are_still_reported_beside_nrc_last);
+    RUN_TEST(test_d104_step_gap_window_takes_the_largest_gap_and_clears);
     return UNITY_END();
 }

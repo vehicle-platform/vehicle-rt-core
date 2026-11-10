@@ -193,6 +193,9 @@ static void check_step_gap(uds_client_core_t* c, uint32_t now_ms)
         if (gap > c->stats.step_gap_max_ms) {
             c->stats.step_gap_max_ms = gap;
         }
+        if (gap > c->step_gap_window_ms) {
+            c->step_gap_window_ms = gap; /* D-104: the longest gap since the last take */
+        }
     }
     c->polled = true;
     c->last_poll_ms = now_ms;
@@ -620,6 +623,7 @@ static void on_negative(uds_client_core_t* c, uint32_t now_ms, uint8_t sid, uint
             }
         }
         break_rpm_run(c, idx); /* D-069 item 3: an NRC breaks the run */
+        c->did[idx].nrc_last = true; /* D-104: after the 0x78 return above, so 0x78 never gets here */
         read_answered(c, now_ms); /* answered, not a timeout */
     }
     c->pending = UDS_CLIENT_REQ_NONE;
@@ -803,6 +807,7 @@ bool uds_client_core_on_indication(uds_client_core_t* c, uint32_t now_ms,
         read_answered(c, now_ms);
         uds_client_did_state_t* d = &c->did[c->pending_idx];
         d->answered = true; /* D-068 item 2: a positive answer undoes a stop and ends the rule */
+        d->nrc_last = false; /* D-104 */
         d->stop_reason = UDS_CLIENT_STOP_NONE;
         d->stop_nrc_count = 0u; /* session_nrc_count stays: D-075 item 1 (f) */
         if (c->pending_idx == (uint32_t)VEHICLE_CL250_IDX_ENGINE_SPEED) {
@@ -892,6 +897,21 @@ uds_client_stop_reason_t uds_client_core_did_stop_reason(const uds_client_core_t
 bool uds_client_core_did_stopped(const uds_client_core_t* c, uint32_t idx)
 {
     return (c != NULL) && (idx < VEHICLE_CL250_DID_COUNT) && is_stopped(&c->did[idx]);
+}
+
+bool uds_client_core_did_last_nrc(const uds_client_core_t* c, uint32_t idx)
+{
+    return (c != NULL) && (idx < VEHICLE_CL250_DID_COUNT) && c->did[idx].nrc_last;
+}
+
+uint32_t uds_client_core_take_step_gap_window_ms(uds_client_core_t* c)
+{
+    if (c == NULL) {
+        return 0u;
+    }
+    const uint32_t gap = c->step_gap_window_ms;
+    c->step_gap_window_ms = 0u;
+    return gap;
 }
 
 uds_client_req_kind_t uds_client_core_pending(const uds_client_core_t* c)
