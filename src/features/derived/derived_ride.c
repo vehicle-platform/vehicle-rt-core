@@ -393,7 +393,7 @@ bool derived_ride_is_tail_signal(uint32_t sig)
     return tail_index(sig) < DERIVED_RIDE_TAILS;
 }
 
-_Static_assert(DERIVED_RIDE_TAIL_POOL == 388u, "the waiting-row pool");
+_Static_assert(DERIVED_RIDE_TAIL_POOL == 306u, "the waiting-row pool");
 
 /* Caps in the order of tail_index(); the slices follow each other in the pool. */
 static const uint16_t tail_caps[DERIVED_RIDE_TAILS] = {

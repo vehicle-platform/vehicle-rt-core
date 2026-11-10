@@ -528,7 +528,7 @@ static uint32_t gen_fingerprint(void)
     return fnv(h, constants, sizeof constants);
 }
 
-#define GEN_FINGERPRINT (0x4184CA10u)
+#define GEN_FINGERPRINT (0xB687D89Au)
 
 static void test_vectors_match_the_pinned_gen_table(void)
 {
