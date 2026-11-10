@@ -8,6 +8,12 @@
 
 #include <unity.h>
 
+/* every data_quality_mask bit: unknown tester quality (D-104) */
+#define DQ_ALL_BITS (VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_200MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_800MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_2000MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_5000MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_10000MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_BUS_OFF | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_TESTER_STALL)
+
 void setUp(void)
 {
     vehicle_signals_init();
@@ -55,7 +61,7 @@ static void test_data_quality_mask_follows_the_published_tester_quality(void)
     derived_step(1000u);
     TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK, &o));
     TEST_ASSERT_EQUAL_INT(DERIVED_VALID, o.status);
-    TEST_ASSERT_EQUAL_FLOAT(255.0f, o.value);
+    TEST_ASSERT_EQUAL_FLOAT((float)DQ_ALL_BITS, o.value);
     uint8_t st[VEHICLE_CL250_DID_COUNT] = {0};
     st[VEHICLE_CL250_IDX_ENGINE_SPEED] = (uint8_t)TESTER_QUALITY_NRC;
     for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
@@ -70,7 +76,7 @@ static void test_data_quality_mask_follows_the_published_tester_quality(void)
     /* the comms task stops publishing: the record's stamp ages past stale_after_ms, unknown again */
     derived_step(1110u + 1000u);
     TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK, &o));
-    TEST_ASSERT_EQUAL_FLOAT(255.0f, o.value);
+    TEST_ASSERT_EQUAL_FLOAT((float)DQ_ALL_BITS, o.value);
 }
 
 static void test_derived_get_refuses_bad_arguments(void)

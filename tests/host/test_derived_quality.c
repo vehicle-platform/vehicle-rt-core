@@ -3,8 +3,7 @@
  * (stopped, skipped), unknown tester quality, bus_off against the previous sample, the stall
  * threshold, the sum and the arming. The rule is the description of the signal in the defs
  * (cl250_derived.yaml); the bit values, the per-DID poll periods, the stale limits and the stall
- * gap all come from gen/. The poll periods below are the test's expectation of the CL250
- * table (the formula itself never writes one).
+ * gap all come from gen/. The poll periods below are gen/ compile-time copies.
  */
 #include "features/derived/derived_core.h"
 #include "vehicle_cl250.h"
@@ -30,12 +29,12 @@ typedef struct {
 } poll_bit_t;
 
 static const poll_bit_t expect_bits[] = {
-    {110u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS},
-    {200u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_200MS},
-    {800u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_800MS},
-    {2000u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_2000MS},
-    {5000u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_5000MS},
-    {10000u, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_10000MS},
+    {VEHICLE_CL250_POLL_MS_ENGINE_SPEED, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS},
+    {VEHICLE_CL250_POLL_MS_THROTTLE_POS, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_200MS},
+    {VEHICLE_CL250_POLL_MS_COOLANT_TEMP, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_800MS},
+    {VEHICLE_CL250_POLL_MS_ENGINE_LOAD, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_2000MS},
+    {VEHICLE_CL250_POLL_MS_ENGINE_OIL_TEMP, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_5000MS},
+    {VEHICLE_CL250_POLL_MS_RUN_TIME_SINCE_START, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_10000MS},
 };
 
 static uint32_t bit_of_did(uint32_t idx)
@@ -58,6 +57,10 @@ static uint32_t all_poll_bits(void)
     return m;
 }
 
+#define ALL_BITS (VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_200MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_800MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_2000MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_5000MS | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_10000MS | \
+     VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_BUS_OFF | VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_TESTER_STALL)
 #define BUS_OFF VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_BUS_OFF
 #define STALL VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_TESTER_STALL
 
@@ -118,7 +121,7 @@ static void test_it_is_computed_from_the_gen_table(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_NONE, derived_core_reason(&core, SIG));
     TEST_ASSERT_EQUAL_UINT32(DERIVED_NO_DATA, derived_core_out(&core, SIG)->status);
     /* the gen/ bits are the eight single bits 1..128 and the table has a bit per DID period */
-    TEST_ASSERT_EQUAL_UINT32(255u, all_poll_bits() | BUS_OFF | STALL);
+    TEST_ASSERT_EQUAL_UINT32(ALL_BITS, all_poll_bits() | BUS_OFF | STALL);
 }
 
 static void test_without_quality_it_stays_no_data(void)
@@ -206,7 +209,7 @@ static void test_stopped_and_skipped_dids_never_count(void)
 static void test_unknown_tester_quality_sets_every_poll_bit_bus_off_and_stall(void)
 {
     q.valid = false; /* never set or closed */
-    TEST_ASSERT_EQUAL_UINT32(255u, mask_now());
+    TEST_ASSERT_EQUAL_UINT32(ALL_BITS, mask_now());
 }
 
 static void test_a_quality_record_older_than_the_stale_limit_is_unknown(void)
@@ -224,7 +227,7 @@ static void test_a_quality_record_older_than_the_stale_limit_is_unknown(void)
     q.stamp_ms = now - limit - 1u; /* one ms too old: unknown */
     derived_core_set_quality(&core, &q);
     derived_core_step(&core, now, in);
-    TEST_ASSERT_EQUAL_UINT32(255u, (uint32_t)derived_core_out(&core, SIG)->value);
+    TEST_ASSERT_EQUAL_UINT32(ALL_BITS, (uint32_t)derived_core_out(&core, SIG)->value);
 }
 
 static void test_bus_off_is_a_count_above_the_previous_sample(void)
@@ -252,7 +255,7 @@ static void test_an_unknown_sample_keeps_the_remembered_bus_off_count(void)
     q.bus_off_count = 1u;
     TEST_ASSERT_EQUAL_UINT32(BUS_OFF, mask_now());
     q.valid = false;
-    TEST_ASSERT_EQUAL_UINT32(255u, next_tick());
+    TEST_ASSERT_EQUAL_UINT32(ALL_BITS, next_tick());
     q.valid = true;
     q.bus_off_count = 1u; /* unchanged from before the unknown sample: no new bus-off */
     TEST_ASSERT_EQUAL_UINT32(0u, next_tick());

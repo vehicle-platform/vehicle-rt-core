@@ -4925,7 +4925,7 @@ static void test_d104_another_nrc_sets_it_and_a_positive_answer_clears_it(void)
     const uint32_t t = next_read_from(0u);
     const uint32_t idx = req_idx();
     TEST_ASSERT_FALSE(uds_client_core_did_last_nrc(&c, idx));
-    nrc(t + 1u, UDS_SID_READ_DATA_BY_IDENTIFIER, 0x22u);
+    nrc(t + 1u, UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_NRC_CONDITIONS_NOT_CORRECT);
     TEST_ASSERT_TRUE(uds_client_core_did_last_nrc(&c, idx));
     for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
         if (i != idx) {
