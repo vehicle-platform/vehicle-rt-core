@@ -410,7 +410,8 @@ static void test_two_cores_never_tear_repeat_or_lose_an_uncounted_frame(void)
     TEST_ASSERT_EQUAL_UINT32(0u, m4_rejected);
     TEST_ASSERT_GREATER_THAN_UINT32(0u, h.write_done);
     TEST_ASSERT_EQUAL_UINT32(h.write_done, m4_chk.seen);
-    TEST_ASSERT_EQUAL_UINT32(m7_offered, m4_chk.seen + h.write_overruns);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_aged); /* bounded contention never holds a frame past its cycle */
+    TEST_ASSERT_EQUAL_UINT32(m7_offered, m4_chk.seen + h.write_overruns + h.write_aged);
     TEST_ASSERT_TRUE(m4_chk.gaps <= h.write_overruns);
 
     /* M4 -> M7 (forwarded verbatim): untorn, in order, every loss counted. */

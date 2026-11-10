@@ -370,6 +370,33 @@ static counts_t run(mb_mode_t mode)
     return c;
 }
 
+static bool hold_lean_hsem; /* the M4 keeps 0x020's HSEM through its turn (its own take/release would free it) */
+
+/* One pass of run() without the bookkeeping. */
+static void step_pass(uint32_t i)
+{
+    const uint32_t now = timebase_now_ms();
+    if ((now % PLATFORM_EKF_LEAN_CYCLE_TIME_MS) == 0u) {
+        lean_ekf_step(&lean, now);
+    }
+    sim_ecu_step(&ecu, now);
+    m4_turn(i, true);
+    if (hold_lean_hsem) {
+        hsem_host_seize((uint8_t)PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID, HSEM_HOST_CORE_M4);
+    }
+    comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
+    can_frame_t got;
+    while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
+        for (uint32_t s = 0u; s < S_COUNT; s++) {
+            if ((got.id == bus_ids[s]) && !got.extended && (bus_log[s].n < LOG_CAP)) {
+                (void)memcpy(bus_log[s].data[bus_log[s].n], got.data, CAN_PORT_MAX_DLC);
+                bus_log[s].n++;
+            }
+        }
+    }
+    hal_time_host_advance(1u);
+}
+
 static void assert_same_cycle(const counts_t* a, const counts_t* b)
 {
     TEST_ASSERT_EQUAL_UINT32(a->hb_frames, b->hb_frames);
@@ -482,6 +509,44 @@ static void test_the_m4_e2e_check_stays_ok_under_refused_hsems_and_tx_full(void)
     TEST_ASSERT_EQUAL_UINT32(m4_seen[1] - 1u, m4_e2e_ok[1]);
 }
 
+/* Bus-off on the platform bus (nothing newer is offered) while the M4 holds 0x020's HSEM
+ * longer than the cycle (D-093 amendment 2 addendum 2): the held frame is dropped, and no
+ * frame reaches the M4 after the release, so nothing stale is read as valid. */
+static void test_a_bus_off_with_the_hsem_held_never_delivers_a_stale_frame(void)
+{
+    rig_up(MB_ON);
+    hold_lean_hsem = false;
+    uint32_t i = 0u;
+    const uint32_t hsem = (uint32_t)PLATFORM_MAILBOX_SLOT_EKF_LEAN_HSEM_ID;
+    for (; i < 40u; i++) { /* warm-up: a few good frames reach the M4 */
+        step_pass(i);
+    }
+    TEST_ASSERT_TRUE(m4_seen[0] > 0u);
+    hold_lean_hsem = true;
+    const uint32_t deferred0 = mailbox_health(timebase_now_ms()).write_deferred;
+    for (; (i < 100u) && (mailbox_health(timebase_now_ms()).write_deferred == deferred0); i++) {
+        step_pass(i);
+    }
+    TEST_ASSERT_TRUE(mailbox_health(timebase_now_ms()).write_deferred > deferred0); /* a frame is waiting */
+    vbus_set_bus_off(&bus_p, node_platform, true); /* nothing newer is offered from now on */
+    const uint32_t end = i + (2u * PLATFORM_EKF_LEAN_CYCLE_TIME_MS);
+    for (; i < end; i++) {
+        step_pass(i);
+    }
+    TEST_ASSERT_TRUE(mailbox_health(timebase_now_ms()).write_aged >= 1u);
+    const uint32_t seen = m4_seen[0];
+    hold_lean_hsem = false;
+    hsem_host_release_as((uint8_t)hsem, HSEM_HOST_CORE_M4);
+    for (uint32_t k = 0u; k < 10u; k++) {
+        step_pass(i + k);
+    }
+    TEST_ASSERT_EQUAL_UINT32(seen, m4_seen[0]); /* the aged frame was never written late */
+    TEST_ASSERT_EQUAL_UINT32(0u, m4_mismatch);
+    TEST_ASSERT_EQUAL_UINT32(0u, m4_e2e_bad[0]);
+    can_port_host_unbind_all();
+    hal_time_host_use_monotonic();
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -489,5 +554,6 @@ int main(void)
     RUN_TEST(test_the_m4_gets_exactly_the_committed_frames_and_its_own_reach_the_bus_verbatim);
     RUN_TEST(test_refused_semaphores_defer_the_writes_and_leave_the_cycle_alone);
     RUN_TEST(test_the_m4_e2e_check_stays_ok_under_refused_hsems_and_tx_full);
+    RUN_TEST(test_a_bus_off_with_the_hsem_held_never_delivers_a_stale_frame);
     return UNITY_END();
 }

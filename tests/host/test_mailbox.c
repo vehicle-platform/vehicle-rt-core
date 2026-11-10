@@ -467,6 +467,76 @@ static void test_an_aged_frame_never_reaches_the_m4_as_a_stale_step_of_one(void)
                                         PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS, out, LEAN_LEN, &rx, now));
 }
 
+/* A 100 ms slot (0x081): the limit is its own cycle, so a swapped cycle_ms row (0x020's 20 ms
+ * on it, or 0x081's 100 ms on 0x020) is caught. */
+#define HBR_ID PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_FRAME_ID
+#define HBR_LEN ((uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_LENGTH)
+#define HBR_HSEM ((uint8_t)PLATFORM_MAILBOX_SLOT_HEARTBEAT_RT_CORE_HSEM_ID)
+#define HBR_CYCLE PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS
+
+static void hold_hbr_then_release(uint32_t hold_passes)
+{
+    hsem_host_seize(HBR_HSEM, HSEM_HOST_CORE_M4);
+    for (uint32_t i = 0u; i < hold_passes; i++) {
+        step();
+    }
+    hsem_host_release_as(HBR_HSEM, HSEM_HOST_CORE_M4);
+    step();
+}
+
+static void offer_hbr(uint8_t k)
+{
+    uint8_t d[MAILBOX_PAYLOAD_BYTES];
+    frame(k, HBR_LEN, d);
+    TEST_ASSERT_TRUE(mailbox_offer(HBR_ID, false, d, HBR_LEN));
+}
+
+static void test_a_100_ms_slot_ages_at_its_own_cycle_not_at_another_slots(void)
+{
+    TEST_ASSERT_TRUE(HBR_CYCLE > (2u * LEAN_CYCLE)); /* the cases below tell the rows apart */
+    boot_with_m4();
+    offer_hbr(1u);
+    hold_hbr_then_release(HBR_CYCLE); /* age == 100: written (a 20 ms row would drop it) */
+    mailbox_health_t h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(0u, h.write_aged);
+    offer_hbr(2u);
+    hold_hbr_then_release(HBR_CYCLE + 1u); /* age == 101: dropped */
+    h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_aged);
+    /* and 0x020 in the same run still ages at 20 ms (a 100 ms row would write it) */
+    offer_lean(3u);
+    hold_then_release(LEAN_CYCLE + 1u);
+    h = mailbox_health(now);
+    TEST_ASSERT_EQUAL_UINT32(2u, h.write_aged);
+    TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
+}
+
+/* An offer made between passes (after a step, before the next one) is stamped by the next
+ * step: the drop comes at most one pass after offer + cycle + 1, never earlier. */
+static void test_an_offer_after_a_step_ages_out_within_one_pass_of_the_cycle(void)
+{
+    boot_with_m4();
+    step();
+    const uint32_t t_offer = now; /* the pass that stamps it runs one ms later */
+    offer_lean(1u);
+    now++;
+    hsem_host_seize(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    uint32_t t_drop = 0u;
+    for (uint32_t i = 0u; (i < (2u * LEAN_CYCLE)) && (t_drop == 0u); i++) {
+        const uint32_t t = now;
+        step();
+        if (mailbox_health(now).write_aged != 0u) {
+            t_drop = t;
+        }
+    }
+    hsem_host_release_as(LEAN_HSEM, HSEM_HOST_CORE_M4);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0u, t_drop);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(LEAN_CYCLE + 1u, t_drop - t_offer); /* never before the cycle */
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(LEAN_CYCLE + 2u, t_drop - t_offer);    /* one pass of lag at most */
+}
+
 /* E-28 (5): nothing goes into an M4 region with another layout, and a frame offered
  * during the mismatch is dropped, never written late once the word matches. */
 static void test_a_mismatched_m4_layout_gets_no_write_and_the_frame_is_dropped(void)
@@ -1022,6 +1092,8 @@ int main(void)
     RUN_TEST(test_a_deferred_frame_taken_within_its_cycle_is_still_written);
     RUN_TEST(test_a_deferred_frame_older_than_its_cycle_is_dropped_not_written);
     RUN_TEST(test_a_newer_offer_restamps_the_age);
+    RUN_TEST(test_a_100_ms_slot_ages_at_its_own_cycle_not_at_another_slots);
+    RUN_TEST(test_an_offer_after_a_step_ages_out_within_one_pass_of_the_cycle);
     RUN_TEST(test_the_age_limit_holds_across_the_ms_wrap);
     RUN_TEST(test_an_aged_frame_never_reaches_the_m4_as_a_stale_step_of_one);
     RUN_TEST(test_a_mismatched_m4_layout_gets_no_write_and_the_frame_is_dropped);
