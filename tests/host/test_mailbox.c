@@ -326,7 +326,7 @@ static void test_a_frame_replaced_while_pending_is_a_counted_overrun(void)
     TEST_ASSERT_EQUAL_UINT32(1u, h.write_done);
 }
 
-/* D-093 amendment 4: a frame the HSEM kept waiting is dropped once strictly older than its
+/* D-093 amendment 2 principle, E-28 follow-up: a frame the HSEM kept waiting is dropped once strictly older than its
  * message's gen/ cycle, never written late. */
 #define LEAN_CYCLE PLATFORM_EKF_LEAN_CYCLE_TIME_MS
 

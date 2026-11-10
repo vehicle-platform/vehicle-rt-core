@@ -220,7 +220,7 @@ static void write_slot(uint32_t i, bool peer_ok, uint32_t now_ms)
         return;
     }
     /* Same principle for a frame the HSEM kept waiting: strictly older than its cycle at
-     * this attempt means drop, never hold (D-093 amendment 4). The M4 then sees a gap. */
+     * this attempt means drop, never hold (D-093 amendment 2 principle, E-28 follow-up). The M4 then sees a gap. */
     mailbox_pending_stamp(&mb_pending[i], now_ms);
     if (mailbox_pending_aged(&mb_pending[i], now_ms, slot_defs[i].cycle_ms)) {
         mailbox_pending_drop_aged(&mb_pending[i]);

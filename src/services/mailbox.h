@@ -17,7 +17,7 @@
  *                     layout word differs it writes no M7->M4 slot and drops the pending
  *                     frames (counted, never held for later; E-28 (5), user 2026-11-04).
  *
- * Age limit (D-093 amendment 4, ISSUES E-28): a pending M7->M4 frame deferred by a refused
+ * Age limit (D-093 amendment 2 principle, E-28 follow-up, ISSUES E-28): a pending M7->M4 frame deferred by a refused
  * HSEM is dropped (never written late) once it has waited strictly longer than its
  * message's gen/ cycle time; a newer offer replaces and restamps it. The age counts from
  * the first mailbox_step() pass that sees the frame, which follows its offer in the same

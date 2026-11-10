@@ -309,7 +309,7 @@ static void test_counters_saturate(void)
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, pend.deferred);
 }
 
-/* D-093 amendment 4: the age limit is a pure decision, strictly older than the cycle. */
+/* D-093 amendment 2 principle, E-28 follow-up: the age limit is a pure decision, strictly older than the cycle. */
 static void test_the_age_limit_is_strictly_above_the_cycle(void)
 {
     const uint32_t cycle = PLATFORM_EKF_LEAN_CYCLE_TIME_MS;

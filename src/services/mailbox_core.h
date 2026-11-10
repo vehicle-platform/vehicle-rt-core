@@ -65,7 +65,7 @@ typedef struct {
     uint32_t overruns; /* a pending frame replaced by a newer one: lost (D-093 item 5 as narrowed) */
     uint32_t dropped;  /* frames given up (the forward's bus-off or latched port, the writer's peer mismatch,
                         * the writer's aged frames: those are also counted in `aged`) */
-    uint32_t aged;     /* writer: frames dropped for waiting longer than their cycle (D-093 amendment 4) */
+    uint32_t aged;     /* writer: frames dropped for waiting longer than their cycle (D-093 amendment 2 principle, E-28 follow-up) */
     uint32_t stamped_ms; /* the pass time the pending frame was first seen by the writer */
     bool stamped;        /* stamped_ms is valid for the current pending frame */
 } mailbox_pending_t;
