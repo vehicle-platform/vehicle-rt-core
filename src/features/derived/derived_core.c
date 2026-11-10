@@ -475,7 +475,7 @@ static derived_flag_t f_power_correction(const derived_ctx_t* x, float* out)
     float rho = 0.0f;
     const derived_flag_t f = derived_core_derived_value(x, VEHICLE_CL250_DERIVED_AIR_DENSITY, &rho);
     if (f == DERIVED_FLAG_NONE) {
-        const float reference = air_density(DERIVED_J1349_REFERENCE_PRESSURE_KPA, DERIVED_J1349_REFERENCE_TEMPERATURE_C);
+        const float reference = air_density(VEHICLE_CL250_J1349_REFERENCE_PRESSURE_KPA, VEHICLE_CL250_J1349_REFERENCE_TEMPERATURE_C);
         *out = reference / rho;
     }
     return f;

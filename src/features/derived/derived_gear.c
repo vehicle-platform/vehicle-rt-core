@@ -1,6 +1,7 @@
 #include "features/derived/derived_gear.h"
 
 #include "vehicle_cl250_constants.h"
+#include "vehicle_cl250_derived.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -8,6 +9,9 @@
 #if defined(__FAST_MATH__)
 #error "derived_gear.c must not be built with -ffast-math"
 #endif
+
+/* derived_gear_estimate() returns 0 for "no gear matches": the gen/ gear_estimate code. */
+_Static_assert((int)VEHICLE_CL250_DERIVED_VALUE_GEAR_ESTIMATE_NO_GEAR == 0, "no_gear code is 0");
 
 /* The table lists the six gen/ ratios; a gearbox with another gear count must extend it. */
 _Static_assert(VEHICLE_CL250_GEAR_COUNT == 6u, "gear table covers exactly the gen/ gear count");

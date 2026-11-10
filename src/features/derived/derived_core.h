@@ -93,10 +93,6 @@ _Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel 
 #define DERIVED_MS_PER_S (1000.0f)                     /* formulas.py:168 */
 #define DERIVED_M3_PER_CM3 (1.0e-6f)                   /* cm3 -> m3, d103_windows.py */
 #define DERIVED_R_AIR_VE (287.05f)                     /* J/(kg K), d103_windows.py */
-/* SAE J1349 reference conditions of the power correction: algorithm parameters, provisional
- * (D-070 item 6), formulas.py:56-57. */
-#define DERIVED_J1349_REFERENCE_PRESSURE_KPA (99.0f)
-#define DERIVED_J1349_REFERENCE_TEMPERATURE_C (25.0f)
 /* A slope or a window mean needs at least this many samples: algorithm parameter,
  * provisional (D-070 item 6), formulas.py:160 and :417. */
 #define DERIVED_MIN_WINDOW_SAMPLES (2u)
