@@ -1,6 +1,7 @@
 /* services/derived_inputs: the DID copy from vehicle_signals into the snapshot (D-070). */
 #include "services/derived_inputs.h"
 #include "services/tester_epoch.h"
+#include "services/tester_quality.h"
 #include "services/vehicle_signals.h"
 
 #include <string.h>
@@ -87,6 +88,58 @@ static void test_the_epoch_travels_in_the_same_record(void)
     tester_epoch_set(false, 0u);
 }
 
+static void test_tester_quality_travels_in_the_record_and_publish_clears_the_window(void)
+{
+    derived_inputs_record_t rec;
+    uint8_t st[VEHICLE_CL250_DID_COUNT] = {0};
+    derived_inputs_init();
+    vehicle_signals_init();
+    tester_quality_set(false, NULL, 0u, 0u);
+    derived_inputs_publish(100u); /* never set: unknown */
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT8(0u, rec.quality_valid);
+    st[3] = (uint8_t)TESTER_QUALITY_NRC;
+    st[4] = (uint8_t)TESTER_QUALITY_STOPPED;
+    st[5] = (uint8_t)TESTER_QUALITY_SKIPPED;
+    tester_quality_set(true, st, 2u, 40u);
+    tester_quality_set(true, st, 2u, 700u); /* the latched gap is the max of the windows */
+    tester_quality_set(true, st, 2u, 90u);
+    derived_inputs_publish(120u);
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT8(1u, rec.quality_valid);
+    TEST_ASSERT_EQUAL_UINT32(2u, rec.bus_off_count);
+    TEST_ASSERT_EQUAL_UINT32(700u, rec.step_gap_window_ms);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)TESTER_QUALITY_NRC, rec.did_quality[3]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)TESTER_QUALITY_STOPPED, rec.did_quality[4]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)TESTER_QUALITY_SKIPPED, rec.did_quality[5]);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)TESTER_QUALITY_OK, rec.did_quality[0]);
+    /* the publish took and cleared the service's window */
+    TEST_ASSERT_EQUAL_UINT32(0u, tester_quality_take().step_gap_max_ms);
+    /* the record keeps the gap for the hold, so a slower derived task still reads it ... */
+    derived_inputs_publish(120u + DERIVED_INPUTS_GAP_HOLD_MS - 1u);
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT32(700u, rec.step_gap_window_ms);
+    /* ... a smaller new gap does not replace it, a larger one does ... */
+    tester_quality_set(true, st, 2u, 600u);
+    derived_inputs_publish(120u + DERIVED_INPUTS_GAP_HOLD_MS - 1u);
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT32(700u, rec.step_gap_window_ms);
+    tester_quality_set(true, st, 2u, 800u);
+    derived_inputs_publish(120u + DERIVED_INPUTS_GAP_HOLD_MS - 1u);
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT32(800u, rec.step_gap_window_ms);
+    /* ... and after the hold it is gone */
+    derived_inputs_publish(120u + (2u * DERIVED_INPUTS_GAP_HOLD_MS));
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT32(0u, rec.step_gap_window_ms);
+    /* a reopened tester reads as unknown again */
+    tester_quality_set(false, NULL, 0u, 0u);
+    derived_inputs_publish(120u + (3u * DERIVED_INPUTS_GAP_HOLD_MS));
+    TEST_ASSERT_TRUE(derived_inputs_read(&rec));
+    TEST_ASSERT_EQUAL_UINT8(0u, rec.quality_valid);
+    TEST_ASSERT_EQUAL_UINT32(0u, rec.bus_off_count);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -95,5 +148,6 @@ int main(void)
     RUN_TEST(test_publish_copies_value_stamp_and_state);
     RUN_TEST(test_a_sample_that_ages_out_is_published_as_stale);
     RUN_TEST(test_the_epoch_travels_in_the_same_record);
+    RUN_TEST(test_tester_quality_travels_in_the_record_and_publish_clears_the_window);
     return UNITY_END();
 }

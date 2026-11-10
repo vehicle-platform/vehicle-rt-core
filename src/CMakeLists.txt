@@ -65,6 +65,7 @@ add_library(vehicle_rtcore_fw STATIC
     services/derived_inputs.c
     services/ride_records.c
     services/tester_epoch.c
+    services/tester_quality.c
     services/mailbox.c
     features/uds/isotp_link.c
     features/uds/uds_client.c

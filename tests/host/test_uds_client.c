@@ -20,6 +20,7 @@
 #include "services/derived_inputs.h"
 #include "services/diag.h"
 #include "services/tester_epoch.h"
+#include "services/tester_quality.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
 #include "platform_limits.h"
@@ -255,6 +256,34 @@ static void test_sil_every_did_stays_valid_and_tester_present_keeps_its_period(v
     TEST_ASSERT_FALSE(uds_client_failed(&client));
     TEST_ASSERT_EQUAL_UINT32(1u, tester_count(VEHICLE_CL250_SESSION_SID, 0u));
     assert_tester_frames_ok();
+}
+
+/* D-104: the glue publishes the tester's data quality after each step and resets it at open. */
+static void test_sil_the_glue_publishes_tester_quality_after_each_step(void)
+{
+    /* opened in setUp, no step yet: unknown */
+    TEST_ASSERT_FALSE(tester_quality_take().valid);
+    run(1000u, false);
+    tester_quality_t q = tester_quality_take();
+    TEST_ASSERT_TRUE(q.valid);
+    TEST_ASSERT_EQUAL_UINT32(0u, q.bus_off_count);
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        TEST_ASSERT_TRUE(q.did[i] != (uint8_t)TESTER_QUALITY_NRC); /* the sim ECU answers all */
+    }
+    /* the service latches the largest gap of the steps until the sampler takes it */
+    TEST_ASSERT_TRUE(q.step_gap_max_ms > 0u);
+    q = tester_quality_take();
+    TEST_ASSERT_EQUAL_UINT32(0u, q.step_gap_max_ms); /* the take cleared it (one step may re-latch) */
+}
+
+/* Runs right after the test above, which leaves the service valid: setUp()'s uds_client_open()
+ * must have reset it (like tester_epoch_set(false, 0)). */
+static void test_sil_open_resets_tester_quality_to_unknown(void)
+{
+    const tester_quality_t q = tester_quality_take();
+    TEST_ASSERT_FALSE(q.valid);
+    TEST_ASSERT_EQUAL_UINT32(0u, q.bus_off_count);
+    TEST_ASSERT_EQUAL_UINT32(0u, q.step_gap_max_ms);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1844,6 +1873,8 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_sil_session_first_then_every_did_valid_with_the_gen_formula);
     RUN_TEST(test_sil_every_did_stays_valid_and_tester_present_keeps_its_period);
+    RUN_TEST(test_sil_the_glue_publishes_tester_quality_after_each_step);
+    RUN_TEST(test_sil_open_resets_tester_quality_to_unknown);
     RUN_TEST(test_sil_ecu_off_goes_absent_and_stale_then_recovers);
     RUN_TEST(test_sil_a_latched_client_in_an_open_epoch_closes_the_ride_when_the_ecu_goes_silent);
     RUN_TEST(test_sil_reopening_the_client_closes_the_ride_and_the_next_epoch_opens_a_new_one);

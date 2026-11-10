@@ -3,6 +3,7 @@
 #include "services/derived_inputs.h"
 #include "services/ride_records.h"
 #include "services/tester_epoch.h"
+#include "services/tester_quality.h"
 #include "services/vehicle_signals.h"
 
 #include <unity.h>
@@ -11,6 +12,7 @@ void setUp(void)
 {
     vehicle_signals_init();
     tester_epoch_set(false, 0u);
+    tester_quality_set(false, NULL, 0u, 0u);
     derived_inputs_init();
     ride_records_init();
     derived_init();
@@ -25,7 +27,7 @@ static void test_nothing_published_means_no_data(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NO_DATA, o.status);
     TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_WHEEL_SLIP, &o));
     TEST_ASSERT_EQUAL_INT(DERIVED_NOT_COMPUTED, o.status);
-    TEST_ASSERT_EQUAL_UINT32(49u + 42u, derived_core()->computed_count); /* class A + the class-B scalars */
+    TEST_ASSERT_EQUAL_UINT32(49u + 1u + 42u, derived_core()->computed_count); /* class A + data_quality_mask (D-104) + the class-B scalars */
 }
 
 static void test_a_published_sample_reaches_the_outputs(void)
@@ -43,6 +45,32 @@ static void test_a_published_sample_reaches_the_outputs(void)
     TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_AIR_FUEL_RATIO, &o));
     TEST_ASSERT_EQUAL_INT(DERIVED_INVALID, o.status);
     TEST_ASSERT_EQUAL_INT(DERIVED_FLAG_STALE_INPUT, o.flag);
+}
+
+/* D-104: the quality state travels comms task -> record -> core, unknown until the writer ran. */
+static void test_data_quality_mask_follows_the_published_tester_quality(void)
+{
+    derived_out_t o;
+    derived_inputs_publish(1000u); /* nothing set: unknown counts as bad */
+    derived_step(1000u);
+    TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK, &o));
+    TEST_ASSERT_EQUAL_INT(DERIVED_VALID, o.status);
+    TEST_ASSERT_EQUAL_FLOAT(255.0f, o.value);
+    uint8_t st[VEHICLE_CL250_DID_COUNT] = {0};
+    st[VEHICLE_CL250_IDX_ENGINE_SPEED] = (uint8_t)TESTER_QUALITY_NRC;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        (void)vehicle_signals_write(i, 1u, 1.0f, 1110u);
+    }
+    tester_quality_set(true, st, 0u, 0u);
+    derived_inputs_publish(1110u);
+    derived_step(1110u);
+    TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK, &o));
+    TEST_ASSERT_EQUAL_UINT32(1110u, o.stamp_ms);
+    TEST_ASSERT_EQUAL_FLOAT((float)VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS, o.value);
+    /* the comms task stops publishing: the record's stamp ages past stale_after_ms, unknown again */
+    derived_step(1110u + 1000u);
+    TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK, &o));
+    TEST_ASSERT_EQUAL_FLOAT(255.0f, o.value);
 }
 
 static void test_derived_get_refuses_bad_arguments(void)
@@ -162,6 +190,7 @@ int main(void)
     UNITY_BEGIN();
     RUN_TEST(test_nothing_published_means_no_data);
     RUN_TEST(test_a_published_sample_reaches_the_outputs);
+    RUN_TEST(test_data_quality_mask_follows_the_published_tester_quality);
     RUN_TEST(test_derived_get_refuses_bad_arguments);
     RUN_TEST(test_a_ride_follows_the_published_epoch);
     RUN_TEST(test_ride_records_follow_the_last_closed_ride);

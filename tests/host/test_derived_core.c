@@ -381,6 +381,11 @@ static void test_computed_set_equals_the_golden_set(void)
         if (vehicle_cl250_derived[s].derived_class != VEHICLE_CL250_DERIVED_CLASS_LIVE) {
             continue; /* class B is checked in test_derived_ride */
         }
+        if (s == (uint32_t)VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK) {
+            /* D-104: computed from the tester's quality inputs, no golden vector (test_derived_quality) */
+            TEST_ASSERT_TRUE(derived_core_is_computed(&core, s));
+            continue;
+        }
         class_a_computed += derived_core_is_computed(&core, s) ? 1u : 0u;
         if (golden[s] != derived_core_is_computed(&core, s)) {
             fprintf(stderr, "signal %u: golden %d, computed %d (reason %d)\n", (unsigned)s, (int)golden[s],

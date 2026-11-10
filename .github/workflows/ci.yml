@@ -145,11 +145,24 @@ jobs:
             echo "::error::tester_epoch_set() has one writer: src/features/uds/uds_client.c"
             exit 1
           fi
+          # D-104: the same for services/tester_quality; its one reader is the derived_inputs sampler,
+          # which takes and clears the latched step gap.
+          if grep -rn --include='*.c' --include='*.h' 'tester_quality_set[[:space:]]*(' src \
+              | grep -vE '^src/(services/tester_quality\.[ch]|features/uds/uds_client\.c):'; then
+            echo "::error::tester_quality_set() has one writer: src/features/uds/uds_client.c"
+            exit 1
+          fi
+          if grep -rn --include='*.c' --include='*.h' 'tester_quality_take[[:space:]]*(' src \
+              | grep -vE '^src/services/(tester_quality|derived_inputs)\.[ch]:'; then
+            echo "::error::tester_quality_take() has one reader: src/services/derived_inputs.c"
+            exit 1
+          fi
           if grep -rnE '#include[[:space:]]+"features/' src/services/tester_epoch.c src/services/tester_epoch.h \
+              src/services/tester_quality.c src/services/tester_quality.h \
               src/services/derived_inputs.c src/services/derived_inputs.h \
               src/services/ride_records.c src/services/ride_records.h \
               src/services/ride_records_core.c src/services/ride_records_core.h; then
-            echo "::error::services/tester_epoch, derived_inputs and ride_records must not include features/"
+            echo "::error::services/tester_epoch, tester_quality, derived_inputs and ride_records must not include features/"
             exit 1
           fi
           if grep -rnE --include='*.c' --include='*.h' 'derived_inputs_read[[:space:]]*\(' src \

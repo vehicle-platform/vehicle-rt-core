@@ -2,8 +2,10 @@
 
 #include "platform_uds.h"
 #include "services/can_if.h"
+#include "services/can_sm.h"
 #include "services/diag.h"
 #include "services/tester_epoch.h"
+#include "services/tester_quality.h"
 #include "services/timebase.h"
 #include "services/vehicle_signals.h"
 #include "vehicle_cl250.h"
@@ -69,6 +71,7 @@ isotp_status_t uds_client_open(uds_client_t* client)
      * epoch after a re-open can repeat an old value; that is safe because this publishes the
      * closed state first and consumers compare with != (services/tester_epoch.h). */
     tester_epoch_set(false, 0u);
+    tester_quality_set(false, NULL, 0u, 0u); /* D-104: unknown until the first step */
     if ((can_if_register_rx(CAN_PORT_VEHICLE, VEHICLE_CL250_REQUEST_ID, REQUEST_IDS_EXTENDED,
                             on_foreign_request, NULL) != CAN_IF_OK) ||
         (can_if_register_rx(CAN_PORT_VEHICLE, VEHICLE_CL250_FALLBACK_REQUEST_ID,
@@ -132,6 +135,31 @@ static void report_diag(uds_client_t* client, uint32_t now, bool present)
     diag_set_vehicle_tester(&status, now);
     const uds_client_stats_t* st = uds_client_core_stats(&client->core);
     diag_set_client_steps(st->step_overruns, st->step_gap_max_ms, now); /* 0xFD02, D-055 */
+}
+
+/* D-104: the tester's data-quality state after a step. Stopped and skipped are reported apart
+ * from a negative response (the consumer excludes them); the bus-off count is the one 0xFD02
+ * reports for the vehicle port. The core's step-gap window is taken here, so the service latches
+ * the largest gap until the sampler takes it. */
+static void report_quality(uds_client_t* client, uint32_t now)
+{
+    uint8_t state[VEHICLE_CL250_DID_COUNT];
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        tester_quality_state_t q = TESTER_QUALITY_OK;
+        if (uds_client_core_did_stopped(&client->core, i)) {
+            q = TESTER_QUALITY_STOPPED;
+        } else if (uds_client_core_did_skipped(&client->core, i, now)) {
+            q = TESTER_QUALITY_SKIPPED;
+        } else if (uds_client_core_did_last_nrc(&client->core, i)) {
+            q = TESTER_QUALITY_NRC;
+        } else {
+            /* OK */
+        }
+        state[i] = (uint8_t)q;
+    }
+    const can_sm_stats_t* const sm = can_sm_stats(CAN_PORT_VEHICLE);
+    tester_quality_set(true, state, (sm != NULL) ? sm->bus_off_events : 0u,
+                       uds_client_core_take_step_gap_window_ms(&client->core));
 }
 
 void uds_client_set_dtc_sink(uds_client_t* client, uds_client_dtc_sink_t sink, void* ctx)
@@ -266,6 +294,7 @@ void uds_client_step(uds_client_t* client)
     /* D-087: the ride boundary of the derived signals; the only writer of the service, and only
      * while the client is open (the early return above leaves it untouched when closed). */
     tester_epoch_set(epoch_open, epoch_counter);
+    report_quality(client, now); /* D-104: the other writer-side service of this glue */
     report_diag(client, now, present);
 }
 

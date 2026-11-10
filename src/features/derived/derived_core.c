@@ -122,6 +122,7 @@ static uint32_t kind_of(uint32_t sig)
     case VEHICLE_CL250_DERIVED_IDLE_RPM_DRIFT:
     case VEHICLE_CL250_DERIVED_ENGINE_BRAKING_PHASE:
     case VEHICLE_CL250_DERIVED_FUEL_LEVEL_FILTERED:
+    case VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK:
         kind = KIND_POINT;
         break;
     default:
@@ -675,11 +676,102 @@ static derived_flag_t f_temp_rate(const derived_ctx_t* x, uint32_t did, float* o
     return f;
 }
 
+/* ---- data_quality_mask (D-104) --------------------------------------------------------------- */
+
+/*
+ * The poll bit of a poll period: each period that vehicle_cl250_dids[] uses, with the gen/
+ * compile-time copy of one DID that has it (so the period is never written here) and the
+ * signal's bit macro. 0 for a period that has no bit.
+ */
+typedef struct {
+    uint32_t period_ms;
+    uint32_t bit;
+} dq_poll_bit_t;
+
+static uint32_t dq_bit_of_period(uint32_t period_ms)
+{
+    static const dq_poll_bit_t dq_poll_bits[] = {
+        {VEHICLE_CL250_POLL_MS_ENGINE_SPEED, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_110MS},
+        {VEHICLE_CL250_POLL_MS_THROTTLE_POS, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_200MS},
+        {VEHICLE_CL250_POLL_MS_COOLANT_TEMP, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_800MS},
+        {VEHICLE_CL250_POLL_MS_ENGINE_LOAD, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_2000MS},
+        {VEHICLE_CL250_POLL_MS_ENGINE_OIL_TEMP, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_5000MS},
+        {VEHICLE_CL250_POLL_MS_RUN_TIME_SINCE_START, VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_POLL_10000MS},
+    };
+    uint32_t bit = 0u;
+    for (uint32_t i = 0u; i < ((sizeof dq_poll_bits) / (sizeof dq_poll_bits[0])); i++) {
+        if (dq_poll_bits[i].period_ms == period_ms) {
+            bit = dq_poll_bits[i].bit;
+        }
+    }
+    return bit;
+}
+
+/* True when every DID's poll period has a bit (init checks it: else the signal is not computed). */
+static bool dq_bits_cover_dids(void)
+{
+    bool ok = true;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        ok = ok && (dq_bit_of_period(vehicle_cl250_dids[i].poll_period_ms) != 0u);
+    }
+    return ok;
+}
+
+/* A DID that counts toward its poll bit: never received, stale or NRC; stopped and skipped
+ * never count. (Unknown tester state is handled by the caller: every DID is bad then.) */
+static bool dq_did_bad(const derived_core_t* c, uint32_t i, uint32_t now)
+{
+    const uint8_t st = c->quality.did[i];
+    bool bad;
+    if ((st == (uint8_t)DERIVED_QUALITY_STOPPED) || (st == (uint8_t)DERIVED_QUALITY_SKIPPED)) {
+        bad = false;
+    } else if (st == (uint8_t)DERIVED_QUALITY_NRC) {
+        bad = true;
+    } else {
+        const derived_did_t* const d = &c->did[i];
+        bad = (!d->present) || d->lapsed ||
+              (derived_core_age_of(now, d->stamp_ms) > (uint32_t)vehicle_cl250_dids[i].stale_after_ms);
+    }
+    return bad;
+}
+
+/* The rule of the data_quality_mask description in the defs (D-104). Always a value on its grid. */
+static derived_flag_t f_data_quality(const derived_ctx_t* x, float* out)
+{
+    derived_core_t* const c = x->c;
+    const derived_quality_in_t* const q = &c->quality;
+    const bool usable = q->known && q->valid &&
+                        (derived_core_age_of(x->now, q->stamp_ms) <= (uint32_t)x->spec->stale_after_ms);
+    uint32_t mask = 0u;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        if ((!usable) || dq_did_bad(c, i, x->now)) {
+            mask |= dq_bit_of_period(vehicle_cl250_dids[i].poll_period_ms);
+        }
+    }
+    if (usable) {
+        if (q->bus_off_count > c->quality_prev_bus_off) {
+            mask |= VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_BUS_OFF;
+        }
+        c->quality_prev_bus_off = q->bus_off_count; /* unknown leaves the remembered count */
+        if (q->step_gap_ms > (uint32_t)VEHICLE_CL250_DATA_QUALITY_TESTER_STALL_GAP_MS) {
+            mask |= VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_TESTER_STALL;
+        }
+    } else {
+        mask |= VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_BUS_OFF |
+                VEHICLE_CL250_DERIVED_BIT_DATA_QUALITY_MASK_TESTER_STALL; /* unknown counts as bad */
+    }
+    *out = (float)mask;
+    return DERIVED_FLAG_NONE;
+}
+
 /* Dispatch of the point formulas (gen index to formula). */
 static derived_flag_t eval_point(const derived_ctx_t* x, float* out)
 {
     derived_flag_t f = DERIVED_FLAG_MATH_ERROR;
     switch (x->sig) {
+    case VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK:
+        f = f_data_quality(x, out);
+        break;
     case VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED:
         f = f_gearbox_ratio(x, out);
         break;
@@ -1039,10 +1131,20 @@ static void event_step(derived_core_t* c, uint32_t sig)
 
 /* Arms the grid: start = the latest first-sample time of the inputs (a derived input: the
  * producer's grid start). False while an input has never been seen. */
-static bool try_arm(derived_core_t* c, uint32_t sig)
+static bool try_arm(derived_core_t* c, uint32_t sig, uint32_t now)
 {
     const vehicle_cl250_derived_t* const spec = &vehicle_cl250_derived[sig];
     derived_sched_t* const s = &c->sched[sig];
+    if (sig == (uint32_t)VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK) {
+        /* D-104: no DID input to wait for; unknown quality is a result too, so the grid
+         * starts at the first step after the glue handed the quality in. */
+        if (c->quality.known) {
+            s->armed = true;
+            s->start_ms = now;
+            s->next_ms = now;
+        }
+        return s->armed;
+    }
     bool complete = true;
     uint32_t start = 0u;
     bool first = true;
@@ -1073,7 +1175,7 @@ static void grid_step(derived_core_t* c, uint32_t sig, uint32_t now)
 {
     derived_sched_t* const s = &c->sched[sig];
     const vehicle_cl250_derived_t* const spec = &vehicle_cl250_derived[sig];
-    if ((s->armed || try_arm(c, sig)) && derived_core_at_or_after(now, s->next_ms)) {
+    if ((s->armed || try_arm(c, sig, now)) && derived_core_at_or_after(now, s->next_ms)) {
         const uint32_t period = (uint32_t)spec->period_ms;
         const uint32_t tick = s->next_ms + (((now - s->next_ms) / period) * period);
         const derived_ctx_t x = {c, now, sig, spec};
@@ -1205,6 +1307,15 @@ static void ride_confirm_rows(derived_core_t* c)
     }
 }
 
+// cppcheck-suppress misra-c2012-8.7 ; DEV-002: called by the derived glue and the tests
+void derived_core_set_quality(derived_core_t* c, const derived_quality_in_t* q)
+{
+    if ((c != NULL) && (q != NULL)) {
+        c->quality = *q;
+        c->quality.known = true;
+    }
+}
+
 void derived_core_step_epoch(derived_core_t* c, uint32_t now_ms, const derived_in_t* in,
                              const derived_epoch_t* epoch)
 {
@@ -1333,6 +1444,13 @@ static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
                 /* the producer must come earlier in the table and be computed itself */
                 if ((idx >= sig) || (!c->sched[idx].computed)) {
                     r = DERIVED_NC_INPUT;
+                }
+            } else if ((sig == (uint32_t)VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK) &&
+                       (kind == VEHICLE_CL250_DERIVED_INPUT_SENSOR)) {
+                /* D-104, the one exception: its sensors (bus-off count, step gap) come from
+                 * the tester's quality record, not from a sensor source */
+                if (!dq_bits_cover_dids()) {
+                    r = DERIVED_NC_GEN; /* a poll period without a bit in the defs */
                 }
             } else {
                 r = DERIVED_NC_INPUT; /* a sensor: none is computed yet */

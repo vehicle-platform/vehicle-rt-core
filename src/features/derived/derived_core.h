@@ -108,6 +108,16 @@ extern "C" {
  * provisional (D-070 item 6), formulas.py:160 and :417. */
 #define DERIVED_MIN_WINDOW_SAMPLES (2u)
 
+/* The tester's quality inputs of data_quality_mask, as the glue hands them in (D-104). */
+typedef struct {
+    bool known;             /* derived_core_set_quality() was called (the grid arms on it) */
+    bool valid;             /* false: the tester's quality is unknown (never set, closed): all bad */
+    uint32_t stamp_ms;      /* when the comms task took it; older than stale_after_ms: unknown */
+    uint32_t bus_off_count; /* vehicle-bus bus-offs since boot */
+    uint32_t step_gap_ms;   /* longest tester poll gap in the record's hold window */
+    uint8_t did[VEHICLE_CL250_DID_COUNT]; /* derived_quality_state_t per DID index */
+} derived_quality_in_t;
+
 typedef struct {
     float value;
     uint32_t stamp_ms;
@@ -198,6 +208,8 @@ typedef struct {
     derived_d103_state_t d103;
     float baro_ref;  /* first positive barometric sample: the altitude reference */
     bool baro_ref_set;
+    derived_quality_in_t quality; /* D-104 inputs of data_quality_mask (set by the glue each step) */
+    uint32_t quality_prev_bus_off; /* bus-off count at the previous data_quality_mask sample (0 before the first) */
     uint32_t max_stale_ms; /* longest limit of any computed signal: the lapse bound */
     uint32_t computed_count;
     uint32_t win_mask;     /* D-079 windows (bit w) with a computed summary and inputs/sizing that fit */
@@ -220,6 +232,14 @@ typedef struct {
 
 /* Boot: decides the computed set from the gen/ table and clears every state. */
 void derived_core_init(derived_core_t* c);
+
+/*
+ * D-104: hands in the tester's quality inputs for the next step (copied; call before
+ * derived_core_step_epoch()). data_quality_mask is the only computed signal whose sensor inputs
+ * come from here instead of the DIDs; it is evaluated on its own grid, armed by the first
+ * call. Without a call it stays NO_DATA. NULL arguments do nothing.
+ */
+void derived_core_set_quality(derived_core_t* c, const derived_quality_in_t* q);
 
 /*
  * One step at now_ms with the current DID samples (in[VEHICLE_CL250_DID_COUNT]). Bounded:

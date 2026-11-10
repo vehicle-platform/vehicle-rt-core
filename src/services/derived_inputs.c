@@ -2,6 +2,7 @@
 
 #include "services/snapshot.h"
 #include "services/tester_epoch.h"
+#include "services/tester_quality.h"
 #include "services/vehicle_signals.h"
 
 #include <stddef.h>
@@ -12,6 +13,21 @@ static derived_inputs_record_t slots[SNAPSHOT_SLOTS];
 static bool inited;       /* set at boot, before the tasks run */
 static uint32_t pass_no;  /* producer only */
 static uint32_t skipped;  /* producer only: publishes before init */
+static uint32_t held_gap_ms;    /* producer only: the gap the records carry (D-104) */
+static uint32_t held_since_ms;  /* producer only: when held_gap_ms was taken */
+
+/* D-104: the gap the record carries. A taken gap larger than the held one replaces it; a held
+ * one is dropped when it is older than DERIVED_INPUTS_GAP_HOLD_MS and then the taken one (if
+ * any) takes its place. */
+static uint32_t hold_gap(uint32_t taken_ms, uint32_t now_ms)
+{
+    const bool expired = (uint32_t)(now_ms - held_since_ms) >= DERIVED_INPUTS_GAP_HOLD_MS;
+    if ((taken_ms > held_gap_ms) || expired) {
+        held_gap_ms = taken_ms;
+        held_since_ms = now_ms;
+    }
+    return held_gap_ms;
+}
 
 // cppcheck-suppress misra-c2012-8.7 ; DEV-002: called by the boot setup (host program, H7) and the tests
 void derived_inputs_init(void)
@@ -20,6 +36,8 @@ void derived_inputs_init(void)
     snapshot_init(&snap);
     pass_no = 0u;
     skipped = 0u;
+    held_gap_ms = 0u;
+    held_since_ms = 0u;
     inited = true;
 }
 
@@ -42,6 +60,11 @@ void derived_inputs_publish(uint32_t now_ms)
     const tester_epoch_t epoch = tester_epoch_get(); /* the same record as the DIDs: one channel */
     rec->epoch_counter = epoch.counter;
     rec->epoch_open = epoch.open ? 1u : 0u;
+    const tester_quality_t quality = tester_quality_take(); /* takes and clears the latched gap */
+    rec->quality_valid = quality.valid ? 1u : 0u;
+    rec->bus_off_count = quality.bus_off_count;
+    rec->step_gap_window_ms = hold_gap(quality.step_gap_max_ms, now_ms);
+    (void)memcpy(rec->did_quality, quality.did, sizeof rec->did_quality);
     for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
         vehicle_signal_sample_t s;
         (void)memset(&s, 0, sizeof s); /* NONE */
