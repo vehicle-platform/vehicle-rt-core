@@ -208,6 +208,8 @@ typedef struct {
     derived_d103_state_t d103;
     float baro_ref;  /* first positive barometric sample: the altitude reference */
     bool baro_ref_set;
+    bool dq_present[VEHICLE_CL250_DID_COUNT];     /* D-104: a sample exists in the record (NOT ride-local) */
+    uint32_t dq_stamp_ms[VEHICLE_CL250_DID_COUNT]; /* ... and its stamp; the ride reset never touches them */
     derived_quality_in_t quality; /* D-104 inputs of data_quality_mask (set by the glue each step) */
     uint32_t quality_prev_bus_off; /* bus-off count at the previous data_quality_mask sample (0 before the first) */
     uint32_t max_stale_ms; /* longest limit of any computed signal: the lapse bound */

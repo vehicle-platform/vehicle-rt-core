@@ -297,6 +297,37 @@ static void test_the_grid_is_the_gen_period_and_a_late_step_evaluates_the_latest
     TEST_ASSERT_EQUAL_UINT32(2u, derived_core_out(&core, SIG)->seq);
 }
 
+static void test_a_ride_change_with_fresh_samples_sets_no_poll_bit(void)
+{
+    derived_epoch_t e = {true, true, 1u};
+    healthy();
+    derived_core_set_quality(&core, &q);
+    derived_core_step_epoch(&core, now, in, &e);
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)derived_core_out(&core, SIG)->value);
+    q.bus_off_count = 1u;
+    e.counter = 2u; /* a new ride: the ride-local state resets, the quality does not */
+    now += STEP;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        in[i].stamp_ms = now;
+    }
+    q.stamp_ms = now;
+    derived_core_set_quality(&core, &q);
+    derived_core_step_epoch(&core, now, in, &e);
+    TEST_ASSERT_EQUAL_INT(DERIVED_VALID, derived_core_out(&core, SIG)->status);
+    TEST_ASSERT_EQUAL_UINT32(now, derived_core_out(&core, SIG)->stamp_ms);
+    TEST_ASSERT_EQUAL_UINT32(BUS_OFF, (uint32_t)derived_core_out(&core, SIG)->value);
+    /* the remembered bus-off count survived the ride change: no new bit next tick */
+    e.counter = 3u;
+    now += STEP;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
+        in[i].stamp_ms = now;
+    }
+    q.stamp_ms = now;
+    derived_core_set_quality(&core, &q);
+    derived_core_step_epoch(&core, now, in, &e);
+    TEST_ASSERT_EQUAL_UINT32(0u, (uint32_t)derived_core_out(&core, SIG)->value);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -315,6 +346,7 @@ int main(void)
     RUN_TEST(test_an_unknown_sample_keeps_the_remembered_bus_off_count);
     RUN_TEST(test_tester_stall_is_a_gap_above_the_gen_threshold);
     RUN_TEST(test_the_value_is_the_sum_of_the_set_bits);
+    RUN_TEST(test_a_ride_change_with_fresh_samples_sets_no_poll_bit);
     RUN_TEST(test_the_grid_is_the_gen_period_and_a_late_step_evaluates_the_latest_tick);
     return UNITY_END();
 }

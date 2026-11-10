@@ -57,6 +57,8 @@ void setUp(void)
     diag_init(timebase_now_ms());
     vehicle_signals_init();
     memset(&client, 0, sizeof client);
+    const uint8_t dirty[VEHICLE_CL250_DID_COUNT] = {0};
+    tester_quality_set(true, dirty, 7u, 9u); /* stale state the open must reset */
     TEST_ASSERT_EQUAL(ISOTP_OK, uds_client_open(&client));
     sniff_count = 0u;
 }
@@ -261,8 +263,6 @@ static void test_sil_every_did_stays_valid_and_tester_present_keeps_its_period(v
 /* D-104: the glue publishes the tester's data quality after each step and resets it at open. */
 static void test_sil_the_glue_publishes_tester_quality_after_each_step(void)
 {
-    /* opened in setUp, no step yet: unknown */
-    TEST_ASSERT_FALSE(tester_quality_take().valid);
     run(1000u, false);
     tester_quality_t q = tester_quality_take();
     TEST_ASSERT_TRUE(q.valid);
@@ -276,8 +276,7 @@ static void test_sil_the_glue_publishes_tester_quality_after_each_step(void)
     TEST_ASSERT_EQUAL_UINT32(0u, q.step_gap_max_ms); /* the take cleared it (one step may re-latch) */
 }
 
-/* Runs right after the test above, which leaves the service valid: setUp()'s uds_client_open()
- * must have reset it (like tester_epoch_set(false, 0)). */
+/* setUp() dirties the service before uds_client_open(); the open must have reset it. */
 static void test_sil_open_resets_tester_quality_to_unknown(void)
 {
     const tester_quality_t q = tester_quality_take();

@@ -728,9 +728,9 @@ static bool dq_did_bad(const derived_core_t* c, uint32_t i, uint32_t now)
     } else if (st == (uint8_t)DERIVED_QUALITY_NRC) {
         bad = true;
     } else {
-        const derived_did_t* const d = &c->did[i];
-        bad = (!d->present) || d->lapsed ||
-              (derived_core_age_of(now, d->stamp_ms) > (uint32_t)vehicle_cl250_dids[i].stale_after_ms);
+        /* the record's own entry, not the ride-local table: quality belongs to the tester */
+        bad = (!c->dq_present[i]) ||
+              (derived_core_age_of(now, c->dq_stamp_ms[i]) > (uint32_t)vehicle_cl250_dids[i].stale_after_ms);
     }
     return bad;
 }
@@ -1081,6 +1081,8 @@ static void ingest(derived_core_t* c, uint32_t now, const derived_in_t* in)
 {
     for (uint32_t i = 0u; i < VEHICLE_CL250_DID_COUNT; i++) {
         derived_did_t* const d = &c->did[i];
+        c->dq_present[i] = in[i].present; /* D-104: independent of the ride-local ignore below */
+        c->dq_stamp_ms[i] = in[i].stamp_ms;
         d->fresh_now = false;
         if (d->ignore_valid && in[i].present && (in[i].stamp_ms == d->ignore_stamp_ms)) {
             d->present = false; /* the old epoch's last sample, held by the producer */
@@ -1194,7 +1196,9 @@ static void grid_step(derived_core_t* c, uint32_t sig, uint32_t now)
 static void reset_class_a(derived_core_t* c)
 {
     for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
-        if (c->sched[sig].computed && (kind_of(sig) != KIND_RIDE)) {
+        /* data_quality_mask belongs to the tester, not the ride (D-104): its grid runs on */
+        if (c->sched[sig].computed && (kind_of(sig) != KIND_RIDE) &&
+            (sig != (uint32_t)VEHICLE_CL250_DERIVED_DATA_QUALITY_MASK)) {
             derived_out_t* const o = &c->out[sig];
             o->status = DERIVED_NO_DATA;
             o->flag = DERIVED_FLAG_NONE;
