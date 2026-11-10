@@ -156,6 +156,9 @@ static void filters(void)
 static void boot(void)
 {
     TEST_ASSERT_TRUE(mailbox_init(&region, now));
+    /* the 0x020 sender's own registration (lean_tx_open in production): an E2E-range ID
+     * reaches the platform port only through its dedicated buffer (ISSUES E-14 (5)) */
+    TEST_ASSERT_EQUAL(CAN_IF_OK, can_if_register_tx_dedicated(CAN_PORT_PLATFORM, LEAN_ID, false));
     filters();
 }
 

@@ -104,10 +104,15 @@ can_port_status_t can_if_apply_filters(can_port_id_t port);
 /* Frames read from the port with no registered receiver (diagnostics). */
 uint32_t can_if_unrouted_count(can_port_id_t port);
 
-/* Frames the vehicle-bus guard refused on this port since init (diagnostics). */
+/* Frames the guard refused on this port since init (diagnostics): on the vehicle port the
+ * D-020 guard, on the platform port an E2E-range standard ID without a registered dedicated
+ * TX buffer (ISSUES E-14 (5)). */
 uint32_t can_if_tx_refused_count(can_port_id_t port);
 
-/* The guard itself, exposed for tests: true if the frame may go out on the port. */
+/* The guard itself, exposed for tests: true if the frame may go out on the port. Vehicle
+ * port: the stateless D-020 guard. Platform port: an E2E-range standard ID needs a
+ * dedicated TX buffer registered and taken at boot (ISSUES E-14 (5)), so the answer
+ * depends on the boot-time registration state. */
 bool can_if_tx_allowed(can_port_id_t port, const can_frame_t* frame);
 
 #ifdef __cplusplus

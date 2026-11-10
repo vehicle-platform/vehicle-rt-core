@@ -353,12 +353,14 @@ int main(int argc, char** argv)
 
     const uds_client_stats_t* st = uds_client_stats(&client);
     printf("vehicle_rtcore_host: %u reads, %u timeouts, %u NRC (%u pending), %u unavailable, "
-           "%u sessions, %u requests; %u refused, %u TX errors, %u guard refusals, fault %d%s\n",
+           "%u sessions, %u requests; %u refused, %u TX errors, %u guard refusals, "
+           "%u platform refusals, fault %d%s\n",
            (unsigned)st->reads_ok, (unsigned)st->timeouts, (unsigned)st->nrc,
            (unsigned)st->response_pending, (unsigned)st->unavailable, (unsigned)st->session_starts,
            (unsigned)st->requests, (unsigned)isotp_link_tx_refused_count(&client.link),
            (unsigned)isotp_link_tx_error_count(&client.link),
-           (unsigned)can_if_tx_refused_count(CAN_PORT_VEHICLE), (int)uds_client_fault(&client),
+           (unsigned)can_if_tx_refused_count(CAN_PORT_VEHICLE),
+           (unsigned)can_if_tx_refused_count(CAN_PORT_PLATFORM), (int)uds_client_fault(&client),
            uds_client_failed(&client) ? ", CLIENT FAILED" : "");
     const dtc_snapshot_core_t* dtc = uds_client_core_dtc(&client.core);
     printf("vehicle_rtcore_host: DTC run %u (%s): %s, %u requests, halt %d\n",
