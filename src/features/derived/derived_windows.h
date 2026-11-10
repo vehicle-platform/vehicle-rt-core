@@ -57,9 +57,11 @@ extern "C" {
 /* New window events of one step: at most one sample per wanted DID plus one row per derived
  * window input (derived_windows_sizing_ok() checks it against gen/). */
 #define DERIVED_WINDOWS_EVENT_CAP (16u)
-/* Post-stop coolant samples (W5 tau; 4 B each, exact: delta time + raw DID integer): max_duration_ms / coolant poll + 2 = 1 800 000 / 800 + 2.
- * gen/ exports both only as table data, so derived_windows_sizing_ok() checks it at init. */
-#define DERIVED_WIN_POST_STOP_COOLANT_CAP (2252u)
+/* Post-stop coolant samples (W5 tau; 4 B each, exact: delta time + raw DID integer):
+ * max_duration_ms / coolant poll + 2, from the gen/ compile-time copies (defs v0.26.0);
+ * derived_windows_sizing_ok() still checks it against the tables at init. */
+#define DERIVED_WIN_POST_STOP_COOLANT_CAP                                                             \
+    ((((uint32_t)VEHICLE_CL250_MAX_DURATION_MS_W5_POST_STOP) / ((uint32_t)VEHICLE_CL250_POLL_MS_COOLANT_TEMP)) + 2u)
 #define DERIVED_WINDOWS_NONE (0xFFu)
 
 /* Latest sample of one window input and its pending expiry. */

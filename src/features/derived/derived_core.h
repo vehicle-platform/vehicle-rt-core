@@ -46,30 +46,43 @@ extern "C" {
 #endif
 
 /*
- * Compile-time sizing (static RAM). Capacity = window_ms / poll period + 2 samples of the
- * DID (or of the derived producer). gen/ does not export window or period as constant
- * expressions, so the numbers below are checked against the gen/ table at init: a signal
- * whose window needs more is NOT_COMPUTED (DERIVED_NC_SIZING), never silently truncated.
- * The caps derive from the gen/ table fields `poll_period_ms` (vehicle_cl250_dids[]; for the
- * accel ring `period_ms` of the producer) and `window_ms` (vehicle_cl250_derived[]) and are
- * checked against them at init (SIZING). Values for the pinned defs: SPEED 60000/110+2 = 547, FUEL_RATE 60000/2000+2 = 32,
- * COOLANT 60000/800+2 = 77, OIL 60000/5000+2 = 14, VEHICLE_ACCEL output 440/110+2 = 6.
+ * Compile-time sizing (static RAM). Capacity = window / sample period + 2 samples of the DID
+ * (or of the derived producer), computed from the gen/ compile-time copies of the table data
+ * (VEHICLE_CL250_POLL_MS_*, _PERIOD_MS_*, _WINDOW_MS_*, _MAX_DURATION_MS_*; defs v0.26.0), so
+ * no capacity is hand-derived (ISSUES E-30 (10)). init still checks every window against the
+ * runtime tables (SIZING): a signal whose window needs more is NOT_COMPUTED
+ * (DERIVED_NC_SIZING), never silently truncated.
  */
-#define DERIVED_WIN_SPEED_CAP (548u)
-#define DERIVED_WIN_FUEL_RATE_CAP (32u)
-#define DERIVED_WIN_COOLANT_CAP (77u)
-#define DERIVED_WIN_OIL_CAP (14u)
-#define DERIVED_WIN_ACCEL_CAP (8u)
-/* D-103 windows: largest window / poll + 2. ENGINE_SPEED poll 110 ms: idle drift 60 s
- * = 545 + 2 = 547; BATTERY_VOLTAGE poll 800 ms: charging plateau 10 s = 12 + 2 = 14;
- * FUEL_LEVEL poll 5000 ms: fuel level filtered 30 s = 6 + 2 = 8; VEHICLE_ACCEL period
- * 110 ms: the 30 s acceleration history = 272 + 2 = 274. */
-#define DERIVED_WIN_RPM_HIST_CAP (548u)
-#define DERIVED_WIN_BATT_HIST_CAP (15u)
-#define DERIVED_WIN_FUEL_HIST_CAP (8u)
-#define DERIVED_WIN_ACCEL_HIST_CAP (277u)
-_Static_assert(DERIVED_WIN_RPM_HIST_CAP >= ((60u * 1000u) / 110u) + 2u, "idle drift window");
-_Static_assert(DERIVED_WIN_ACCEL_HIST_CAP >= ((30u * 1000u) / 110u) + 2u, "fuel filter window");
+#define DERIVED_HIST_CAP(window_ms, period_ms) ((((uint32_t)(window_ms)) / ((uint32_t)(period_ms))) + 2u)
+#define DERIVED_CAP_MAX(a, b) (((a) > (b)) ? (a) : (b))
+/* VEHICLE_SPEED: vehicle_accel's slope window and the fuel-consumption average. */
+#define DERIVED_WIN_SPEED_CAP                                                                         \
+    DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_VEHICLE_ACCEL, VEHICLE_CL250_POLL_MS_VEHICLE_SPEED), \
+                    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_CONSUMPTION_AVG,                    \
+                                     VEHICLE_CL250_POLL_MS_VEHICLE_SPEED))
+#define DERIVED_WIN_FUEL_RATE_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_CONSUMPTION_AVG, VEHICLE_CL250_POLL_MS_ENGINE_FUEL_RATE)
+#define DERIVED_WIN_COOLANT_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_COOLANT_RATE, VEHICLE_CL250_POLL_MS_COOLANT_TEMP)
+#define DERIVED_WIN_OIL_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_OIL_TEMP_RATE, VEHICLE_CL250_POLL_MS_ENGINE_OIL_TEMP)
+/* vehicle_accel outputs for vehicle_jerk's window. */
+#define DERIVED_WIN_ACCEL_CAP DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_VEHICLE_JERK, VEHICLE_CL250_PERIOD_MS_VEHICLE_ACCEL)
+/* D-103 histories. ENGINE_SPEED: the charging plateau, idle RPM std / drift and the D-079 W3
+ * warm-idle instance (its RPM statistics read this history). */
+#define DERIVED_WIN_RPM_HIST_CAP                                                                      \
+    DERIVED_CAP_MAX(                                                                                  \
+        DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_CHARGING_PLATEAU_VOLTAGE,            \
+                                         VEHICLE_CL250_POLL_MS_ENGINE_SPEED),                         \
+                        DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_IDLE_RPM_STD, VEHICLE_CL250_POLL_MS_ENGINE_SPEED)), \
+        DERIVED_CAP_MAX(DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_IDLE_RPM_DRIFT, VEHICLE_CL250_POLL_MS_ENGINE_SPEED), \
+                        DERIVED_HIST_CAP(VEHICLE_CL250_MAX_DURATION_MS_W3_WARM_IDLE,                  \
+                                         VEHICLE_CL250_POLL_MS_ENGINE_SPEED)))
+#define DERIVED_WIN_BATT_HIST_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_CHARGING_PLATEAU_VOLTAGE, VEHICLE_CL250_POLL_MS_BATTERY_VOLTAGE)
+#define DERIVED_WIN_FUEL_HIST_CAP                                                                     \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_LEVEL_FILTERED, VEHICLE_CL250_POLL_MS_FUEL_LEVEL)
+/* vehicle_accel outputs over fuel_level_filtered's window. */
+#define DERIVED_WIN_ACCEL_HIST_CAP                                                                    \
+    DERIVED_HIST_CAP(VEHICLE_CL250_WINDOW_MS_FUEL_LEVEL_FILTERED, VEHICLE_CL250_PERIOD_MS_VEHICLE_ACCEL)
 
 /*
  * Algorithm parameters and unit conversions ported from the reference
