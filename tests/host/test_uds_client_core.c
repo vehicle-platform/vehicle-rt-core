@@ -2340,23 +2340,96 @@ static void test_withheld_fc_without_a_request_only_holds(void)
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
 }
 
-/* ISSUES E-16 (3) NIT: repeated unsolicited First Frames do not renew the hold while it
- * runs (counted in stats.fc_hold_not_renewed), so a chatty ECU cannot keep polling off. */
-static void test_repeated_unsolicited_first_frames_do_not_renew_the_hold(void)
+/* D-116 / ISSUES E-16 (3): repeated unsolicited First Frames do not renew the hold. The
+ * glue runs on_fc_withheld before poll in every step, so the helper does too: a First
+ * Frame every period ms for total ms; the longest silence (and the first request) stays
+ * within RESPONSE_TIMEOUT_MAX_MS plus one step. */
+static void ff_storm_keeps_a_slot(uint32_t period, uint32_t total)
+{
+    bring_up(0u);
+    uint32_t last_req = 0u;
+    uint32_t ff_start = 0u; /* the first First Frame after the last request */
+    uint32_t requests = 0u;
+    for (uint32_t t = 1u; t <= total; t++) {
+        if ((t % period) == 0u) {
+            if (ff_start <= last_req) {
+                ff_start = t;
+            }
+            uds_client_core_on_fc_withheld(&c, t, 0u);
+        }
+        if (poll_at(t) != K_NONE) {
+            /* silence from the first First Frame: the window plus one step */
+            TEST_ASSERT_LESS_OR_EQUAL_UINT32(VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 1u,
+                                             t - ((ff_start > last_req) ? ff_start : last_req));
+            last_req = t;
+            requests++;
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(total / (VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 1u), requests);
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, stats()->fc_hold_not_renewed);
+}
+
+static void test_a_first_frame_every_step_for_10_s_leaves_a_request_slot_per_window(void)
+{
+    ff_storm_keeps_a_slot(1u, 10000u);
+}
+
+static void test_first_frames_every_1_2_5_20_1000_2000_ms_leave_a_request_slot_per_window(void)
+{
+    const uint32_t periods[] = {2u, 5u, 20u, 1000u, 2000u};
+    for (uint32_t i = 0u; i < (sizeof periods / sizeof periods[0]); i++) {
+        setUp();
+        ff_storm_keeps_a_slot(periods[i], 12000u);
+    }
+}
+
+static void test_a_first_frame_in_the_expiry_step_does_not_reopen_the_window(void)
 {
     bring_up(0u);
     uds_client_core_on_fc_withheld(&c, 5u, 0u);
-    for (uint32_t t = 100u; t < 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS; t += 100u) {
-        uds_client_core_on_fc_withheld(&c, t, 0u);
-    }
-    TEST_ASSERT_EQUAL_UINT32(20u, stats()->fc_hold_not_renewed);
     TEST_ASSERT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+    uds_client_core_on_fc_withheld(&c, 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS, 0u);
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
-    /* after the hold ended a new First Frame starts a new one */
-    const uint32_t t2 = 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 50u;
-    uds_client_core_on_fc_withheld(&c, t2, 0u);
-    TEST_ASSERT_EQUAL_UINT32(20u, stats()->fc_hold_not_renewed);
-    TEST_ASSERT_EQUAL(K_NONE, poll_at(t2 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+    TEST_ASSERT_EQUAL_UINT32(1u, stats()->fc_hold_not_renewed);
+}
+
+/* F3: no timestamp compare, so a First Frame 2^32 ms later (the clock wrapped) cannot alias. */
+static void test_a_fresh_first_frame_after_the_ms_wrap_holds_the_full_window(void)
+{
+    const uint32_t t0 = UINT32_MAX - 500u;
+    bring_up(t0);
+    uds_client_core_on_fc_withheld(&c, t0, 0u);
+    TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(t0 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
+    const uint32_t t1 = t0 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 50u;
+    uds_client_core_on_fc_withheld(&c, t1, 0u);
+    TEST_ASSERT_EQUAL_UINT32(0u, stats()->fc_hold_not_renewed);
+    TEST_ASSERT_EQUAL(K_NONE, poll_at(t1 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+    TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(t1 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
+}
+
+/* F4: a withheld First Frame that is not a 0x62 answer ends the pending read with no DID
+ * consequence; a 0x62 one keeps the unavailable/skip handling. */
+static void test_a_non_0x62_first_frame_ends_a_pending_read_without_a_did_consequence(void)
+{
+    bring_up(0u);
+    TEST_ASSERT_EQUAL(K_READ, poll_at(0u));
+    const uint32_t idx = req_idx();
+    uds_client_core_on_fc_withheld(&c, 10u, 0x54u);
+    TEST_ASSERT_EQUAL_UINT32(1u, stats()->fc_withheld);
+    TEST_ASSERT_EQUAL_UINT32(0u, stats()->unavailable);
+    TEST_ASSERT_EQUAL_UINT32(0u, stats()->did_skips);
+    TEST_ASSERT_EQUAL_UINT32(0u, stats()->did_stops);
+    TEST_ASSERT_EQUAL_UINT32(0u, stats()->timeouts);
+    TEST_ASSERT_FALSE(uds_client_core_did_skipped(&c, idx, 10u));
+    TEST_ASSERT_EQUAL(UDS_CLIENT_REQ_NONE, uds_client_core_pending(&c));
+    TEST_ASSERT_EQUAL(K_NONE, poll_at(10u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+    setUp();
+    bring_up(0u);
+    TEST_ASSERT_EQUAL(K_READ, poll_at(0u));
+    const uint32_t idx2 = req_idx();
+    uds_client_core_on_fc_withheld(&c, 10u, 0x62u);
+    TEST_ASSERT_EQUAL_UINT32(1u, stats()->unavailable);
+    TEST_ASSERT_TRUE(uds_client_core_did_skipped(&c, idx2, 10u));
 }
 
 static void test_failed_reception_without_a_pending_read_still_holds(void)
@@ -4979,7 +5052,11 @@ int main(void)
     RUN_TEST(test_timeout_cr_is_service_unavailable_with_cooldown_and_n_bs_hold);
     RUN_TEST(test_withheld_fc_is_unavailable_without_a_timeout_and_holds_the_max_timeout);
     RUN_TEST(test_withheld_fc_without_a_request_only_holds);
-    RUN_TEST(test_repeated_unsolicited_first_frames_do_not_renew_the_hold);
+    RUN_TEST(test_a_first_frame_every_step_for_10_s_leaves_a_request_slot_per_window);
+    RUN_TEST(test_first_frames_every_1_2_5_20_1000_2000_ms_leave_a_request_slot_per_window);
+    RUN_TEST(test_a_first_frame_in_the_expiry_step_does_not_reopen_the_window);
+    RUN_TEST(test_a_fresh_first_frame_after_the_ms_wrap_holds_the_full_window);
+    RUN_TEST(test_a_non_0x62_first_frame_ends_a_pending_read_without_a_did_consequence);
     RUN_TEST(test_a_segmented_answer_to_a_read_is_unavailable_without_a_timeout_or_hold);
     RUN_TEST(test_a_hold_across_the_ms_wrap_is_kept_and_ends_on_time);
     RUN_TEST(test_failed_reception_without_a_pending_read_still_holds);

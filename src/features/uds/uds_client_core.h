@@ -242,7 +242,6 @@ typedef struct {
     uint32_t wait_ms;         /* current response timeout */
 
     bool fc_hold;             /* the running hold was started by a withheld FC */
-    uint32_t fc_hold_start_ms;
     bool hold;
     uint32_t hold_start_ms;
     uint32_t hold_ms;

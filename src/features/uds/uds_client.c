@@ -211,6 +211,15 @@ void uds_client_step(uds_client_t* client)
         client->foreign_seen = foreign_frames;
         latch(client, UDS_CLIENT_FAULT_FOREIGN_TESTER); /* before anything is sent */
     }
+    /* The link decides a received First Frame's Flow Control (sent, or withheld and the
+     * reception cancelled) when it steps. Step it before the poll, so a withheld First Frame
+     * is no running reception when the poll looks (only while a reception runs: a message
+     * queued outside the client keeps its place) (ISSUES E-16 (3), D-116): First Frames in
+     * every step would otherwise keep rx_busy set at every poll and starve the tester
+     * although every hold has expired. The late step below still sends what the poll queues. */
+    if (isotp_link_rx_busy(&client->link)) {
+        isotp_link_step(&client->link);
+    }
     take_indication(client, now);
     if (isotp_link_take_fc_withheld(&client->link)) {
         uds_client_core_on_fc_withheld(&client->core, now,

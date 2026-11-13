@@ -718,6 +718,50 @@ static void test_sil_a_first_frame_after_tester_present_gets_no_flow_control(voi
     TEST_ASSERT_FALSE(uds_client_failed(&client));
 }
 
+/* D-116 (F1/F5) in the glue: uds_client_step() runs the withheld-FC report before the poll,
+ * so a First Frame in the expiry step must not reopen the window. An ECU First Frame every
+ * period ms after tester present: the tester still sends within the window plus one step. */
+static void ff_storm_glue(uint32_t period)
+{
+    run(500u, false);
+    run_until_last_request(VEHICLE_CL250_TESTER_PRESENT_SID, UDS_CLIENT_REQ_NONE);
+    uint32_t last = timebase_now_ms();
+    uint32_t seen = sniff_count;
+    uint32_t ff_start = 0u; /* the first First Frame after the last request */
+    for (uint32_t i = 0u; i < 9000u; i++) {
+        if ((i % period) == 0u) {
+            if (ff_start <= last) {
+                ff_start = timebase_now_ms();
+            }
+            ecu_first_frame(10u);
+        }
+        run(1u, false);
+        for (uint32_t j = seen; j < sniff_count; j++) {
+            if (is_tester(&sniffed[j])) {
+                TEST_ASSERT_LESS_OR_EQUAL_UINT32(
+                    VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 10u,
+                    sniffed[j].t - ((ff_start > last) ? ff_start : last));
+                last = sniffed[j].t;
+            }
+        }
+        seen = sniff_count;
+    }
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 10u,
+                                     timebase_now_ms() - ((ff_start > last) ? ff_start : last));
+    TEST_ASSERT_GREATER_THAN_UINT32(3u, tester_frames_since(0u));
+    TEST_ASSERT_FALSE(uds_client_failed(&client));
+}
+
+static void test_sil_first_frames_every_ms_still_leave_a_request_slot_per_window(void)
+{
+    ff_storm_glue(1u);
+}
+
+static void test_sil_first_frames_every_2000_ms_still_leave_a_request_slot_per_window(void)
+{
+    ff_storm_glue(2000u);
+}
+
 /* MINOR-4 (b), M2 in one pass: a second tester's frame and the ECU's First Frame arrive
  * in the same pass while a read is armed: the client latches before the link steps, so
  * no FC goes out. */
@@ -1857,6 +1901,8 @@ int main(void)
     RUN_TEST(test_sil_segmented_answer_gets_one_flow_control_and_is_unavailable);
     RUN_TEST(test_sil_a_latched_client_sends_no_flow_control);
     RUN_TEST(test_sil_a_first_frame_after_tester_present_gets_no_flow_control);
+    RUN_TEST(test_sil_first_frames_every_ms_still_leave_a_request_slot_per_window);
+    RUN_TEST(test_sil_first_frames_every_2000_ms_still_leave_a_request_slot_per_window);
     RUN_TEST(test_sil_a_foreign_frame_in_the_same_pass_as_a_first_frame_blocks_the_fc);
     RUN_TEST(test_sil_first_frames_at_and_above_the_client_buffer);
     RUN_TEST(test_sil_the_total_cap_fires_during_a_reception_after_the_fc);
