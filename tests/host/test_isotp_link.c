@@ -225,6 +225,30 @@ static void test_cl250_a_second_first_frame_in_one_request_gets_no_second_fc(voi
     TEST_ASSERT_FALSE(isotp_link_rx_busy(&dut));
 }
 
+/* ISSUES E-16 (3) NIT: a First Frame the core drops as invalid (FF_DL 0 = escape, FF_DL 1..7
+ * = must be a Single Frame, a frame shorter than 8 B) queues no Flow Control, so it is not a
+ * withheld FC: it neither counts nor reports, so the client holds nothing for it. */
+static void test_cl250_invalid_first_frames_are_dropped_without_a_withheld_fc(void)
+{
+    request_and_expect();
+    const uint8_t dl[3] = {0x00u, 0x01u, 0x07u};
+    for (uint8_t i = 0u; i < 3u; i++) {
+        uint8_t ff[8];
+        memcpy(ff, ff10, sizeof ff);
+        ff[0] = 0x10u;
+        ff[1] = dl[i];
+        inject(VEHICLE_CL250_RESPONSE_ID, true, ff, 8u);
+        run_ms(2u);
+    }
+    inject(VEHICLE_CL250_RESPONSE_ID, true, ff10, 7u); /* short frame */
+    run_ms(2u);
+    TEST_ASSERT_EQUAL_UINT32(0u, dut_frames());
+    TEST_ASSERT_EQUAL_UINT32(0u, isotp_link_fc_withheld_count(&dut));
+    TEST_ASSERT_FALSE(isotp_link_take_fc_withheld(&dut));
+    TEST_ASSERT_FALSE(isotp_link_rx_busy(&dut));
+    TEST_ASSERT_TRUE(dut.response_open); /* the real answer may still come */
+}
+
 static void test_cl250_first_frame_above_the_cap_gets_nothing_on_the_bus(void)
 {
     request_and_expect();
@@ -1039,6 +1063,7 @@ int main(void)
     RUN_TEST(test_cl250_unsolicited_first_frame_gets_no_flow_control);
     RUN_TEST(test_cl250_first_frame_of_the_expected_answer_gets_the_one_gen_fc);
     RUN_TEST(test_cl250_a_second_first_frame_in_one_request_gets_no_second_fc);
+    RUN_TEST(test_cl250_invalid_first_frames_are_dropped_without_a_withheld_fc);
     RUN_TEST(test_cl250_first_frame_above_the_cap_gets_nothing_on_the_bus);
     RUN_TEST(test_cl250_missing_cf_after_the_fc_ends_in_n_cr_base);
     RUN_TEST(test_cl250_wrong_sequence_number_after_the_fc_aborts);
