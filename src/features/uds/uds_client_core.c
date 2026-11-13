@@ -702,7 +702,16 @@ void uds_client_core_on_fc_withheld(uds_client_core_t* c, uint32_t now_ms, uint8
     } else {
         /* nothing pending and not a 0x19 answer: no 0x19 consequence */
     }
-    hold_for(c, now_ms, VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS); /* the ECU waits its N_Bs */
+    /* The ECU waits its N_Bs: hold. A First Frame inside a running withheld-FC hold does not
+     * renew it (ISSUES E-16 (3)): polling resumes RESPONSE_TIMEOUT_MAX_MS after the first one
+     * however many follow; the later ones are only counted. */
+    if (c->fc_hold && !expired(now_ms, c->fc_hold_start_ms, VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS)) {
+        count(&c->stats.fc_hold_not_renewed);
+    } else {
+        c->fc_hold = true;
+        c->fc_hold_start_ms = now_ms;
+        hold_for(c, now_ms, VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS);
+    }
 }
 
 /* D-080: the message while a 0x19 is pending (not an NRC). Only the positive answer of the

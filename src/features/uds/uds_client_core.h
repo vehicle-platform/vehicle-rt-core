@@ -192,6 +192,7 @@ typedef struct {
     uint32_t did_skips;         /* DIDs put into skip cooldown */
     uint32_t unexpected;        /* responses that matched no pending request */
     uint32_t fc_withheld;       /* First Frames the link did not answer with an FC */
+    uint32_t fc_hold_not_renewed; /* ... of those, arrived while a withheld-FC hold ran: no renewal */
     uint32_t slow_answers;      /* answers later than poll_period_ms after their stamp (D-051) */
     uint32_t session_starts;    /* positive session responses */
     uint32_t session_losses;    /* session up -> down */
@@ -240,6 +241,8 @@ typedef struct {
     uint32_t wait_start_ms;   /* start of the current response timeout */
     uint32_t wait_ms;         /* current response timeout */
 
+    bool fc_hold;             /* the running hold was started by a withheld FC */
+    uint32_t fc_hold_start_ms;
     bool hold;
     uint32_t hold_start_ms;
     uint32_t hold_ms;

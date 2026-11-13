@@ -2340,6 +2340,25 @@ static void test_withheld_fc_without_a_request_only_holds(void)
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
 }
 
+/* ISSUES E-16 (3) NIT: repeated unsolicited First Frames do not renew the hold while it
+ * runs (counted in stats.fc_hold_not_renewed), so a chatty ECU cannot keep polling off. */
+static void test_repeated_unsolicited_first_frames_do_not_renew_the_hold(void)
+{
+    bring_up(0u);
+    uds_client_core_on_fc_withheld(&c, 5u, 0u);
+    for (uint32_t t = 100u; t < 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS; t += 100u) {
+        uds_client_core_on_fc_withheld(&c, t, 0u);
+    }
+    TEST_ASSERT_EQUAL_UINT32(20u, stats()->fc_hold_not_renewed);
+    TEST_ASSERT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+    TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
+    /* after the hold ended a new First Frame starts a new one */
+    const uint32_t t2 = 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 50u;
+    uds_client_core_on_fc_withheld(&c, t2, 0u);
+    TEST_ASSERT_EQUAL_UINT32(20u, stats()->fc_hold_not_renewed);
+    TEST_ASSERT_EQUAL(K_NONE, poll_at(t2 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
+}
+
 static void test_failed_reception_without_a_pending_read_still_holds(void)
 {
     bring_up(0u);
@@ -4960,6 +4979,7 @@ int main(void)
     RUN_TEST(test_timeout_cr_is_service_unavailable_with_cooldown_and_n_bs_hold);
     RUN_TEST(test_withheld_fc_is_unavailable_without_a_timeout_and_holds_the_max_timeout);
     RUN_TEST(test_withheld_fc_without_a_request_only_holds);
+    RUN_TEST(test_repeated_unsolicited_first_frames_do_not_renew_the_hold);
     RUN_TEST(test_a_segmented_answer_to_a_read_is_unavailable_without_a_timeout_or_hold);
     RUN_TEST(test_a_hold_across_the_ms_wrap_is_kept_and_ends_on_time);
     RUN_TEST(test_failed_reception_without_a_pending_read_still_holds);
