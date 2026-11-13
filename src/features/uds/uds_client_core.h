@@ -300,7 +300,7 @@ void uds_client_core_latch(uds_client_core_t* c);
 /* The link withheld the Flow Control for a First Frame (isotp_link_take_fc_withheld()):
  * no answer comes. Ends the pending request without a timeout (a read: skip cooldown,
  * counted unavailable) and sends nothing for RESPONSE_TIMEOUT_MAX_MS. first_byte is the
- * First Frame's first data byte (isotp_link_fc_withheld_first_byte(), 0 if unknown): the
+ * First Frame's first data byte (isotp_link_fc_withheld_first_byte()): the
  * positive 0x19 SID with no 0x19 pending is a late or duplicate 0x19 answer; it is nobody's
  * answer to a pending read (no consequence for the DID) and turns 0x19 off for the epoch. */
 void uds_client_core_on_fc_withheld(uds_client_core_t* c, uint32_t now_ms, uint8_t first_byte);
@@ -317,6 +317,11 @@ bool uds_client_core_take_rx_cancel(uds_client_core_t* c);
  * is kept, a shorter never replaces it). The ECU does not stop at the cancel: with BS 0 it
  * sends its remaining CFs, each up to N_Cr apart, so the glue passes the time they need.
  */
+/* True while a request is pending and its total cap (RESPONSE_TIMEOUT_MAX_MS) has expired:
+ * the next poll ends it, and the glue leaves the First Frame of that step to the old order
+ * (poll first, so the response is closed when the link decides its Flow Control). */
+bool uds_client_core_response_cap_expired(const uds_client_core_t* c, uint32_t now_ms);
+
 void uds_client_core_extend_hold(uds_client_core_t* c, uint32_t ms);
 
 /*

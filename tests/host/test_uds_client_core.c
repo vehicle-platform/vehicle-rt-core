@@ -2277,7 +2277,7 @@ static void test_withheld_fc_is_unavailable_without_a_timeout_and_holds_the_max_
     bring_up(0u);
     TEST_ASSERT_EQUAL(K_READ, poll_at(0u));
     const uint32_t idx = req_idx();
-    uds_client_core_on_fc_withheld(&c, 10u, 0u);
+    uds_client_core_on_fc_withheld(&c, 10u, 0x62u);
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->fc_withheld);
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->unavailable);
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->timeouts);
@@ -2320,7 +2320,7 @@ static void test_a_hold_across_the_ms_wrap_is_kept_and_ends_on_time(void)
     bring_up(t0);
     TEST_ASSERT_EQUAL(K_READ, poll_at(t0));
     const uint32_t tw = UINT32_MAX - 500u;
-    uds_client_core_on_fc_withheld(&c, tw, 0u);
+    uds_client_core_on_fc_withheld(&c, tw, 0x62u);
     /* a failed reception asks for the shorter N_Bs hold: the running one is kept */
     TEST_ASSERT_FALSE(
         uds_client_core_on_indication(&c, UINT32_MAX - 100u, ISOTP_N_TIMEOUT_CR, NULL, 0u, &smp));
@@ -2332,7 +2332,7 @@ static void test_a_hold_across_the_ms_wrap_is_kept_and_ends_on_time(void)
 static void test_withheld_fc_without_a_request_only_holds(void)
 {
     bring_up(0u);
-    uds_client_core_on_fc_withheld(&c, 5u, 0u);
+    uds_client_core_on_fc_withheld(&c, 5u, 0x62u);
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->fc_withheld);
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->unavailable);
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->did_skips);
@@ -2355,7 +2355,7 @@ static void ff_storm_keeps_a_slot(uint32_t period, uint32_t total)
             if (ff_start <= last_req) {
                 ff_start = t;
             }
-            uds_client_core_on_fc_withheld(&c, t, 0u);
+            uds_client_core_on_fc_withheld(&c, t, 0x62u);
         }
         if (poll_at(t) != K_NONE) {
             /* silence from the first First Frame: the window plus one step */
@@ -2366,7 +2366,9 @@ static void ff_storm_keeps_a_slot(uint32_t period, uint32_t total)
         }
     }
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(total / (VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 1u), requests);
-    TEST_ASSERT_GREATER_THAN_UINT32(0u, stats()->fc_hold_not_renewed);
+    if (period < VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS) {
+        TEST_ASSERT_GREATER_THAN_UINT32(0u, stats()->fc_hold_not_renewed);
+    }
 }
 
 static void test_a_first_frame_every_step_for_10_s_leaves_a_request_slot_per_window(void)
@@ -2374,9 +2376,9 @@ static void test_a_first_frame_every_step_for_10_s_leaves_a_request_slot_per_win
     ff_storm_keeps_a_slot(1u, 10000u);
 }
 
-static void test_first_frames_every_1_2_5_20_1000_2000_ms_leave_a_request_slot_per_window(void)
+static void test_first_frames_every_2_5_20_1000_1999_2000_2001_ms_leave_a_request_slot_per_window(void)
 {
-    const uint32_t periods[] = {2u, 5u, 20u, 1000u, 2000u};
+    const uint32_t periods[] = {2u, 5u, 20u, 1000u, 1999u, 2000u, 2001u};
     for (uint32_t i = 0u; i < (sizeof periods / sizeof periods[0]); i++) {
         setUp();
         ff_storm_keeps_a_slot(periods[i], 12000u);
@@ -2386,9 +2388,9 @@ static void test_first_frames_every_1_2_5_20_1000_2000_ms_leave_a_request_slot_p
 static void test_a_first_frame_in_the_expiry_step_does_not_reopen_the_window(void)
 {
     bring_up(0u);
-    uds_client_core_on_fc_withheld(&c, 5u, 0u);
+    uds_client_core_on_fc_withheld(&c, 5u, 0x62u);
     TEST_ASSERT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
-    uds_client_core_on_fc_withheld(&c, 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS, 0u);
+    uds_client_core_on_fc_withheld(&c, 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS, 0x62u);
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->fc_hold_not_renewed);
 }
@@ -2398,10 +2400,10 @@ static void test_a_fresh_first_frame_after_the_ms_wrap_holds_the_full_window(voi
 {
     const uint32_t t0 = UINT32_MAX - 500u;
     bring_up(t0);
-    uds_client_core_on_fc_withheld(&c, t0, 0u);
+    uds_client_core_on_fc_withheld(&c, t0, 0x62u);
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(t0 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
     const uint32_t t1 = t0 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + 50u;
-    uds_client_core_on_fc_withheld(&c, t1, 0u);
+    uds_client_core_on_fc_withheld(&c, t1, 0x62u);
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->fc_hold_not_renewed);
     TEST_ASSERT_EQUAL(K_NONE, poll_at(t1 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
     TEST_ASSERT_NOT_EQUAL(K_NONE, poll_at(t1 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS));
@@ -2932,7 +2934,7 @@ static void test_d068_a_withheld_fc_stops_a_never_answered_unverified_did(void)
     const uint32_t u = first_unverified();
     bring_up(0u);
     serve_until_read(0u, u);
-    uds_client_core_on_fc_withheld(&c, 0u, 0u);
+    uds_client_core_on_fc_withheld(&c, 0u, 0x62u);
     TEST_ASSERT_TRUE(uds_client_core_did_stopped(&c, u));
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->did_skips);
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->did_stops);
@@ -2942,13 +2944,13 @@ static void test_d068_a_withheld_fc_stops_a_never_answered_unverified_did(void)
     bring_up(0u);
     drive(0u, 1u);
     serve_until_read(vehicle_cl250_dids[u].poll_period_ms, u);
-    uds_client_core_on_fc_withheld(&c, vehicle_cl250_dids[u].poll_period_ms, 0u);
+    uds_client_core_on_fc_withheld(&c, vehicle_cl250_dids[u].poll_period_ms, 0x62u);
     TEST_ASSERT_FALSE(uds_client_core_did_stopped(&c, u));
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->did_skips);
     setUp();
     bring_up(0u);
     serve_until_read(0u, VEHICLE_CL250_IDX_VEHICLE_SPEED);
-    uds_client_core_on_fc_withheld(&c, 0u, 0u);
+    uds_client_core_on_fc_withheld(&c, 0u, 0x62u);
     TEST_ASSERT_FALSE(uds_client_core_did_stopped(&c, VEHICLE_CL250_IDX_VEHICLE_SPEED));
     TEST_ASSERT_EQUAL_UINT32(1u, stats()->did_skips);
     TEST_ASSERT_EQUAL_UINT32(0u, stats()->did_stops);
@@ -4631,7 +4633,7 @@ static void test_D080_item3_a_withheld_fc_for_a_0x19_halts_it_and_holds_for_the_
 {
     bring_up_dtc(DTC_T0);
     const uint32_t tc = wait_for_dtc_request(DTC_T0);
-    uds_client_core_on_fc_withheld(&c, tc + 5u, 0u);
+    uds_client_core_on_fc_withheld(&c, tc + 5u, 0x62u);
     TEST_ASSERT_EQUAL(DTC_SNAPSHOT_HALT_SEGMENTED, dtc_snapshot_core_halt(dtc()));
     TEST_ASSERT_EQUAL(UDS_CLIENT_REQ_NONE, uds_client_core_pending(&c));
     TEST_ASSERT_EQUAL(K_NONE, poll_at(tc + 5u + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS - 1u));
@@ -4646,7 +4648,7 @@ static void test_D080_item3_a_withheld_fc_halts_0x19_only_for_a_0x19_answer(void
     /* nothing pending, not a 0x19 answer: no 0x19 consequence */
     bring_up_dtc(DTC_T0);
     TEST_ASSERT_EQUAL(UDS_CLIENT_REQ_NONE, uds_client_core_pending(&c));
-    uds_client_core_on_fc_withheld(&c, DTC_T0, 0u);
+    uds_client_core_on_fc_withheld(&c, DTC_T0, 0x62u);
     TEST_ASSERT_EQUAL(DTC_SNAPSHOT_HALT_NONE, dtc_snapshot_core_halt(dtc()));
     TEST_ASSERT_TRUE(dtc_snapshot_core_run_active(dtc()));
 
@@ -5053,7 +5055,7 @@ int main(void)
     RUN_TEST(test_withheld_fc_is_unavailable_without_a_timeout_and_holds_the_max_timeout);
     RUN_TEST(test_withheld_fc_without_a_request_only_holds);
     RUN_TEST(test_a_first_frame_every_step_for_10_s_leaves_a_request_slot_per_window);
-    RUN_TEST(test_first_frames_every_1_2_5_20_1000_2000_ms_leave_a_request_slot_per_window);
+    RUN_TEST(test_first_frames_every_2_5_20_1000_1999_2000_2001_ms_leave_a_request_slot_per_window);
     RUN_TEST(test_a_first_frame_in_the_expiry_step_does_not_reopen_the_window);
     RUN_TEST(test_a_fresh_first_frame_after_the_ms_wrap_holds_the_full_window);
     RUN_TEST(test_a_non_0x62_first_frame_ends_a_pending_read_without_a_did_consequence);

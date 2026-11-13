@@ -689,11 +689,11 @@ void uds_client_core_on_fc_withheld(uds_client_core_t* c, uint32_t now_ms, uint8
          * SESSION_RETRY_INTERVAL_MS, inside the RESPONSE_TIMEOUT_MAX_MS hold below anyway. */
         c->pending = UDS_CLIENT_REQ_NONE;
         dtc_snapshot_core_halt_after_answer(&c->dtc, DTC_SNAPSHOT_HALT_LATE_FF);
-    } else if ((c->pending == UDS_CLIENT_REQ_READ) && (first_byte != 0u) &&
+    } else if ((c->pending == UDS_CLIENT_REQ_READ) &&
                (first_byte != (uint8_t)(UDS_SID_READ_DATA_BY_IDENTIFIER +
                                         UDS_POSITIVE_RESPONSE_OFFSET))) {
         /* F4: a First Frame that is not a 0x62 answer is not this read's: it ends without a
-         * DID consequence, like a late 0x19 answer (first_byte 0 = unknown: the case below). */
+         * DID consequence, like a late 0x19 answer (the link always reports the byte, 0x00 included). */
         drop_read_for_late_dtc_answer(c);
         c->pending = UDS_CLIENT_REQ_NONE;
     } else if (c->pending != UDS_CLIENT_REQ_NONE) {
@@ -856,6 +856,12 @@ bool uds_client_core_take_rx_cancel(uds_client_core_t* c)
         c->rx_cancel_due = false;
     }
     return due;
+}
+
+bool uds_client_core_response_cap_expired(const uds_client_core_t* c, uint32_t now_ms)
+{
+    return (c != NULL) && (c->pending != UDS_CLIENT_REQ_NONE) &&
+           expired(now_ms, c->sent_ms, VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS);
 }
 
 void uds_client_core_extend_hold(uds_client_core_t* c, uint32_t ms)
