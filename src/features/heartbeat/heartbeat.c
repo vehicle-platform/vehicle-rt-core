@@ -41,7 +41,14 @@ static void send(heartbeat_t* hb, uint32_t now, bool ekf_stalled)
         hb->e2e = next; /* the counter advances with accepted frames only */
     }
     if (finished) {
+        const bool first = !hb->cycle.started;
         com_cycle_done(&hb->cycle, now, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
+        if (first) {
+            /* D-118: 0x081 (100 ms) and 0x020 (20 ms) would coincide every 100 ms; the first
+             * frame (INIT) goes out at once, the schedule then runs half a 0x020 cycle
+             * behind it so the two never share a pass (the G474 RX FIFOs are 3 deep). */
+            hb->cycle.next_due_ms += (uint32_t)PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u;
+        }
     }
 }
 

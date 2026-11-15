@@ -187,6 +187,40 @@ jobs:
             echo "::error::the inter-core mailbox / HSEM is retired (D-118)"
             exit 1
           fi
+          # D-118 (safety review MINOR-4): platform TX goes through com_send() only (the UDS
+          # link keeps its own write); nobody else may put a frame on FDCAN2.
+          if grep -rnE --include='*.c' --include='*.h' 'can_if_write[[:space:]]*\(' src \
+              | grep -vE '^src/(features/uds/isotp_link\.(c|h)|services/(com|can_if)\.(c|h)):'; then
+            echo "::error::can_if_write() is called by features/uds/isotp_link and services/com only"
+            exit 1
+          fi
+          # The safety MCU's own IDs are never rt-core TX buffers.
+          if grep -rnE --include='*.c' --include='*.h' 'can_if_register_tx_dedicated[^;]*PLATFORM_(SAFETY_WARNING_STATUS|HEARTBEAT_SAFETY)_FRAME_ID' src; then
+            echo "::error::0x023 / 0x082 belong to the safety MCU: never a dedicated TX ID of rt-core"
+            exit 1
+          fi
+          # 0x120 SafetyRequest: at most one future sender file (none today), which never
+          # registers a receiver (it must not be filled from a received frame).
+          req=$(grep -rlE --include='*.c' --include='*.h' 'PLATFORM_SAFETY_REQUEST_|platform_safety_request_pack' src || true)
+          if [ "$(echo "$req" | grep -c .)" -gt 1 ]; then
+            echo "::error::PLATFORM_SAFETY_REQUEST_ / platform_safety_request_pack in more than one file: $req"
+            exit 1
+          fi
+          if [ -n "$req" ] && grep -nE 'can_if_register_rx' $req; then
+            echo "::error::the 0x120 sender must not register a platform receiver"
+            exit 1
+          fi
+          # The two retired mailbox DTCs are never reported (safety review MINOR-5).
+          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' src \
+              | grep -vE '^src/services/diag\.c:'; then
+            echo "::error::the SAFETY_MAILBOX DTC indices appear in src/services/diag.c only (never reported, D-118)"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' tests \
+              | grep -vE '^tests/host/(test_diag|test_platform_tx)\.c:'; then
+            echo "::error::the SAFETY_MAILBOX DTC indices appear in tests/host/test_diag.c and test_platform_tx.c only"
+            exit 1
+          fi
 
       - name: Static analysis (cppcheck, blocking)
         run: |

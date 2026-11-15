@@ -30,7 +30,7 @@ Every ID, length, choice value, cycle time and E2E parameter comes from gen/ (`p
 
 ## Timing and order
 
-- **Cycle:** deadline-anchored at the gen/ cycle time (`services/com_core`). The first frame goes out at the first step. A late pass skips missed deadlines, never a burst.
+- **Cycle:** deadline-anchored at the gen/ cycle time (`services/com_core`). The first frame goes out at the first step; the schedule then runs half a 0x020 cycle (10 ms) behind it, so 0x081 never shares a pass with 0x020 (D-118, the safety MCU's RX FIFOs are 3 deep): the second frame is 110 ms after the first, then every 100 ms. A late pass skips missed deadlines, never a burst.
 - **Order:** `app/comms` `comms_pass()`: platform `can_sm_step()` → `can_if_dispatch()` → `vehicle_republish_step()` → `heartbeat_step()` → `uds_server_step()`.
   - It sees the platform port's current state, and its E2E frame never waits behind server work (as D-056 item 4 for 0x021).
   - It sees the DTC results that the server's monitors reported in the previous pass (1 ms), and reads their conditions directly as well.
