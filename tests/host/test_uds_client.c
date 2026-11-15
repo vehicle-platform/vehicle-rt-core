@@ -646,6 +646,10 @@ static void test_sil_segmented_answer_gets_one_flow_control_and_is_unavailable(v
 }
 
 static void foreign_frame_latches(uint32_t id, bool extended);
+static void run_to(uint32_t t);
+static void ecu_response_pending(void);
+static void ecu_dtc_nrc(uint8_t code);
+static void open_dtc(uint8_t stored);
 
 /* A frame from the test node as if the ECU sent it (29-bit response ID). */
 static void ecu_frame(const uint8_t* d)
@@ -716,6 +720,232 @@ static void test_sil_a_first_frame_after_tester_present_gets_no_flow_control(voi
     }
     TEST_ASSERT_EQUAL_UINT32(1u, isotp_link_fc_withheld_count(&client.link));
     TEST_ASSERT_FALSE(uds_client_failed(&client));
+}
+
+/* D-116 (F1/F5) in the glue: uds_client_step() runs the withheld-FC report before the poll,
+ * so a First Frame in the expiry step must not reopen the window. An ECU First Frame every
+ * period ms after tester present: the tester still sends within the window plus one step. */
+static void ff_storm_glue(uint32_t period, uint16_t ff_dl, uint32_t slack)
+{
+    run(500u, false);
+    run_until_last_request(VEHICLE_CL250_TESTER_PRESENT_SID, UDS_CLIENT_REQ_NONE);
+    uint32_t last = timebase_now_ms();
+    uint32_t seen = sniff_count;
+    uint32_t ff_start = 0u; /* the first First Frame after the last request */
+    for (uint32_t i = 0u; i < 9000u; i++) {
+        if ((i % period) == 0u) {
+            if (ff_start <= last) {
+                ff_start = timebase_now_ms();
+            }
+            ecu_first_frame(ff_dl);
+        }
+        run(1u, false);
+        for (uint32_t j = seen; j < sniff_count; j++) {
+            if (is_tester(&sniffed[j])) {
+                TEST_ASSERT_LESS_OR_EQUAL_UINT32(
+                    VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + slack,
+                    sniffed[j].t - ((ff_start > last) ? ff_start : last));
+                last = sniffed[j].t;
+            }
+        }
+        seen = sniff_count;
+    }
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS + slack,
+                                     timebase_now_ms() - ((ff_start > last) ? ff_start : last));
+    TEST_ASSERT_GREATER_THAN_UINT32(3u, tester_frames_since(0u));
+    TEST_ASSERT_FALSE(uds_client_failed(&client));
+}
+
+static void test_sil_first_frames_every_ms_still_leave_a_request_slot_per_window(void)
+{
+    ff_storm_glue(1u, 10u, 10u);
+}
+
+static void test_sil_first_frames_every_2000_ms_still_leave_a_request_slot_per_window(void)
+{
+    ff_storm_glue(2000u, 10u, 10u);
+}
+
+/* R2-3: First Frames above the buffer (FC.OVFLW) start no reception: decided in the late
+ * step, reported in the next pass. Every one is reported (client count = link count) and the
+ * bound holds: at most one step more silence. */
+static void ovflw_storm(uint32_t period)
+{
+    ff_storm_glue(period, 300u, 2u);
+    run(2u, false); /* the last report */
+    TEST_ASSERT_GREATER_THAN_UINT32(0u, isotp_link_fc_withheld_count(&client.link));
+    TEST_ASSERT_EQUAL_UINT32(isotp_link_fc_withheld_count(&client.link),
+                             uds_client_stats(&client)->fc_withheld);
+}
+
+static void test_sil_ovflw_first_frames_every_ms_are_all_reported_and_leave_a_slot(void)
+{
+    ovflw_storm(1u);
+}
+
+static void test_sil_ovflw_first_frames_every_2000_ms_are_all_reported_and_leave_a_slot(void)
+{
+    ovflw_storm(2000u);
+}
+
+/* R2-3: an OVFLW First Frame in pass N, a reception First Frame in pass N+1: both reported. */
+static void test_sil_two_withheld_first_frames_in_consecutive_passes_are_both_reported(void)
+{
+    run(500u, false);
+    run_until_last_request(VEHICLE_CL250_TESTER_PRESENT_SID, UDS_CLIENT_REQ_NONE);
+    ecu_first_frame(300u);
+    run(1u, false);
+    ecu_first_frame(10u);
+    run(2u, false);
+    TEST_ASSERT_EQUAL_UINT32(2u, isotp_link_fc_withheld_count(&client.link));
+    TEST_ASSERT_EQUAL_UINT32(2u, uds_client_stats(&client)->fc_withheld);
+}
+
+/* R2-1: with a read pending, only a 0x62 First Frame keeps the unavailable/skip handling;
+ * any other first byte (0x00 included) ends the read with no DID consequence. */
+static void pending_read_then_first_frame_with_byte(uint8_t first, uint32_t* unavailable,
+                                                    uint32_t* skips, uint32_t* stops)
+{
+    setUp();
+    run(500u, false);
+    ecu.silent = true;
+    run_until_last_request(UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_CLIENT_REQ_READ);
+    /* FF_DL 65: above the read cap, so even a 0x62 First Frame gets no FC */
+    const uint8_t ff[8] = {0x10u, 0x41u, first, 0xF4u, 0x05u, 0x01u, 0x02u, 0x03u};
+    ecu_frame(ff);
+    run(3u, false);
+    TEST_ASSERT_EQUAL_UINT32(1u, uds_client_stats(&client)->fc_withheld);
+    TEST_ASSERT_EQUAL(UDS_CLIENT_REQ_NONE, uds_client_core_pending(&client.core));
+    *unavailable = uds_client_stats(&client)->unavailable;
+    *skips = uds_client_stats(&client)->did_skips;
+    *stops = uds_client_stats(&client)->did_stops;
+}
+
+static void test_sil_only_a_0x62_first_frame_gives_a_pending_read_a_did_consequence(void)
+{
+    uint32_t un, sk, st;
+    pending_read_then_first_frame_with_byte(0x54u, &un, &sk, &st);
+    TEST_ASSERT_EQUAL_UINT32(0u, un + sk + st);
+    pending_read_then_first_frame_with_byte(0x00u, &un, &sk, &st);
+    TEST_ASSERT_EQUAL_UINT32(0u, un + sk + st);
+    pending_read_then_first_frame_with_byte(0x62u, &un, &sk, &st);
+    TEST_ASSERT_EQUAL_UINT32(1u, un);
+    TEST_ASSERT_EQUAL_UINT32(1u, sk + st);
+}
+
+/* R2-2: a First Frame that matches the pending request arrives in the step where its total
+ * cap expires. The poll ends the request first, so the response is closed and the FC is
+ * withheld as before the pre-step; the D-116 hold follows. */
+static void ff_matching_the_pending_request(uint16_t ff_dl)
+{
+    uint8_t ff[8] = {(uint8_t)(0x10u | (ff_dl >> 8u)), (uint8_t)(ff_dl & 0xFFu), 0u, 0u, 0u, 0u, 0u, 0u};
+    TEST_ASSERT_TRUE(client.link.response_open);
+    for (uint8_t i = 0u; i < client.link.response_prefix_len; i++) {
+        ff[2u + i] = client.link.response_prefix[i];
+    }
+    ecu_frame(ff);
+}
+
+static void cap_step_first_frame(uint8_t sid, uds_client_req_kind_t kind)
+{
+    run(500u, false);
+    ecu.silent = true;
+    run_until_last_request(sid, kind);
+    const uint32_t t0 = client.core.sent_ms;
+    const uint32_t nrc_at[4] = {50u, 200u, 550u, 1300u};
+    for (uint32_t i = 0u; i < 4u; i++) {
+        run_to(t0 + nrc_at[i]);
+        ecu_response_pending();
+    }
+    run_to(t0 + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS);
+    TEST_ASSERT_EQUAL(kind, uds_client_core_pending(&client.core));
+    const uint32_t mark = sniff_count;
+    ff_matching_the_pending_request(10u);
+    run(1u, false);
+    TEST_ASSERT_EQUAL_UINT32(0u, tester_frames_since(mark)); /* no FC in the cap step */
+    run(VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS, false);
+    for (uint32_t i = mark; i < sniff_count; i++) {
+        if (is_tester(&sniffed[i])) {
+            TEST_ASSERT_NOT_EQUAL_HEX8(0x30u, (uint8_t)(sniffed[i].f.data[0] & 0xF0u)); /* never an FC */
+        }
+    }
+    TEST_ASSERT_FALSE(uds_client_failed(&client));
+}
+
+static void test_sil_a_matching_first_frame_in_the_read_cap_step_is_withheld(void)
+{
+    cap_step_first_frame(UDS_SID_READ_DATA_BY_IDENTIFIER, UDS_CLIENT_REQ_READ);
+    TEST_ASSERT_EQUAL_UINT32(1u, isotp_link_fc_withheld_count(&client.link));
+}
+
+/* R2-2, 0x19: a 0x19 gets no NRC 0x78 extension, so only a running reception reaches the
+ * total cap. A second First Frame in the cap step is withheld (the one FC per request went
+ * out already): exactly one FC on the bus, the client is not latched. */
+static uint32_t count_and_drop_tester_fcs(void)
+{
+    uint32_t fcs = 0u;
+    for (uint32_t i = 0u; i < sniff_count; i++) {
+        if (is_tester(&sniffed[i]) && ((sniffed[i].f.data[0] & 0xF0u) == 0x30u)) {
+            fcs++;
+        }
+    }
+    sniff_count = 0u; /* the log is short: the run is long */
+    return fcs;
+}
+
+static void test_sil_a_second_first_frame_in_the_0x19_cap_step_gets_no_second_fc(void)
+{
+    open_dtc(0u);
+    ecu.dtc_silent = true;
+    for (uint32_t n = 0u; (n < 20000u) && (uds_client_core_pending(&client.core) != UDS_CLIENT_REQ_DTC); n++) {
+        run(1u, false);
+        (void)count_and_drop_tester_fcs();
+    }
+    TEST_ASSERT_EQUAL(UDS_CLIENT_REQ_DTC, uds_client_core_pending(&client.core));
+    uint32_t fcs = 0u;
+    const uint32_t t_req = client.core.sent_ms;
+    const uint8_t ff[8] = {0x10u, 0xFFu, 0x59u, 0x01u, 0xFFu, 0x01u, 0x00u, 0x02u};
+    run_to(t_req + 50u);
+    ecu_frame(ff);
+    for (uint32_t k = 1u; k <= 19u; k++) {
+        run_to(t_req + 50u + (99u * k));
+        const uint8_t cf[8] = {(uint8_t)(0x20u | (k & 0x0Fu)), 1u, 2u, 3u, 4u, 5u, 6u, 7u};
+        ecu_frame(cf);
+        run(1u, false);
+        fcs += count_and_drop_tester_fcs();
+    }
+    run_to(t_req + VEHICLE_CL250_RESPONSE_TIMEOUT_MAX_MS);
+    TEST_ASSERT_TRUE(uds_client_core_response_cap_expired(&client.core, timebase_now_ms()));
+    ecu_frame(ff);
+    run(5u, false);
+    fcs += count_and_drop_tester_fcs();
+    TEST_ASSERT_EQUAL_UINT32(1u, fcs);
+    TEST_ASSERT_FALSE(uds_client_failed(&client));
+}
+
+/* R2-4: a guard refusal seen at the pre-step latches the client before the poll can send:
+ * no request in that pass, whatever the phase of the polling. */
+static void test_sil_a_guard_refusal_at_the_pre_step_blocks_the_request_of_that_pass(void)
+{
+    for (uint32_t shift = 0u; shift < 60u; shift++) {
+        setUp();
+        run(500u + shift, false);
+        ecu.silent = true; /* no answer ends the reception before the link steps */
+        run(1u, false);
+        can_frame_t f;
+        memset(&f, 0, sizeof f);
+        f.id = VEHICLE_CL250_REQUEST_ID;
+        f.extended = true;
+        f.dlc = 8u;
+        const uint8_t reset[8] = {0x02u, 0x11u, 0x01u, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu};
+        memcpy(f.data, reset, 8u);
+        TEST_ASSERT_EQUAL(CAN_PORT_ERR_REFUSED, can_if_write(CAN_PORT_VEHICLE, &f));
+        const uint32_t requests = uds_client_stats(&client)->requests;
+        ecu_first_frame(10u); /* a reception runs, so the link steps before the poll */
+        run(1u, false);
+        TEST_ASSERT_TRUE(uds_client_failed(&client));
+        TEST_ASSERT_EQUAL_UINT32(requests, uds_client_stats(&client)->requests);
+    }
 }
 
 /* MINOR-4 (b), M2 in one pass: a second tester's frame and the ECU's First Frame arrive
@@ -1857,6 +2087,15 @@ int main(void)
     RUN_TEST(test_sil_segmented_answer_gets_one_flow_control_and_is_unavailable);
     RUN_TEST(test_sil_a_latched_client_sends_no_flow_control);
     RUN_TEST(test_sil_a_first_frame_after_tester_present_gets_no_flow_control);
+    RUN_TEST(test_sil_first_frames_every_ms_still_leave_a_request_slot_per_window);
+    RUN_TEST(test_sil_first_frames_every_2000_ms_still_leave_a_request_slot_per_window);
+    RUN_TEST(test_sil_ovflw_first_frames_every_ms_are_all_reported_and_leave_a_slot);
+    RUN_TEST(test_sil_ovflw_first_frames_every_2000_ms_are_all_reported_and_leave_a_slot);
+    RUN_TEST(test_sil_two_withheld_first_frames_in_consecutive_passes_are_both_reported);
+    RUN_TEST(test_sil_only_a_0x62_first_frame_gives_a_pending_read_a_did_consequence);
+    RUN_TEST(test_sil_a_matching_first_frame_in_the_read_cap_step_is_withheld);
+    RUN_TEST(test_sil_a_second_first_frame_in_the_0x19_cap_step_gets_no_second_fc);
+    RUN_TEST(test_sil_a_guard_refusal_at_the_pre_step_blocks_the_request_of_that_pass);
     RUN_TEST(test_sil_a_foreign_frame_in_the_same_pass_as_a_first_frame_blocks_the_fc);
     RUN_TEST(test_sil_first_frames_at_and_above_the_client_buffer);
     RUN_TEST(test_sil_the_total_cap_fires_during_a_reception_after_the_fc);
