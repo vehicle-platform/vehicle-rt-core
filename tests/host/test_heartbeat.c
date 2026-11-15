@@ -27,6 +27,8 @@ static uint8_t node_dut;
 static uint8_t node_peer;
 static uint8_t node_vehicle;
 static heartbeat_t hb;
+/* D-118: the schedule runs half a 0x020 cycle behind the first (INIT) frame. */
+#define HB_PHASE_MS (PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u)
 static vehicle_e2e_rx_state_t rx;
 static bool client_running; /* the test writes a healthy tester status every pass */
 static bool client_latched;
@@ -165,8 +167,8 @@ static void test_uptime_counts_whole_seconds_since_boot(void)
     memset(&s, 0, sizeof s);
     run(&s, 1u);
     TEST_ASSERT_EQUAL_UINT16(START_MS / 1000u, s.last.uptime); /* the timebase counts from reset */
-    run(&s, 2000u);
-    TEST_ASSERT_EQUAL_UINT16((START_MS + 2000u) / 1000u, s.last.uptime); /* last frame at +2000 ms */
+    run(&s, 2000u + HB_PHASE_MS);
+    TEST_ASSERT_EQUAL_UINT16((START_MS + 2000u) / 1000u, s.last.uptime); /* last frame at +2000 + phase */
 }
 
 /* ------------------------------------------------------------------ faults */
@@ -175,7 +177,7 @@ static void test_a_failed_monitor_degrades_until_it_passes_and_each_onset_counts
 {
     seen_t s;
     memset(&s, 0, sizeof s);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u); /* INIT, then the first NORMAL */
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u); /* INIT, then the first NORMAL */
     TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
     for (uint32_t i = 0u; i < 3u * PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS; i++) {
         diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_ECU_COMM_LOST, true); /* every pass */
@@ -200,7 +202,7 @@ static void test_a_dtc_clear_hides_no_fault_and_keeps_the_error_count(void)
     seen_t s;
     memset(&s, 0, sizeof s);
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED, true);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u);
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u);
     TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
     diag_dtc_clear_all(); /* UDS 0x14 from a platform tester */
     TEST_ASSERT_EQUAL_UINT8(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED));
@@ -240,7 +242,7 @@ static void test_a_latched_vehicle_port_degrades_without_the_server_monitor(void
 {
     seen_t s;
     memset(&s, 0, sizeof s);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u); /* INIT, then the first NORMAL */
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u); /* INIT, then the first NORMAL */
     TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
     latch_vehicle_port();
     memset(&s, 0, sizeof s);
@@ -259,7 +261,7 @@ static void test_an_unknown_vehicle_port_state_is_not_read_as_a_latch(void)
     TEST_ASSERT_FALSE(can_sm_state_known(CAN_PORT_VEHICLE));
     seen_t s;
     memset(&s, 0, sizeof s);
-    for (uint32_t i = 0u; i <= PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS; i++) {
+    for (uint32_t i = 0u; i <= PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS; i++) {
         const diag_vehicle_tester_t st = {true, true, false,
                                           (uint8_t)PLATFORM_UDS_VEHICLE_TESTER_STATUS_FAULT_NONE};
         diag_set_vehicle_tester(&st, timebase_now_ms());

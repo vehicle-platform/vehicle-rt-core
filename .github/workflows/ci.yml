@@ -175,46 +175,52 @@ jobs:
             echo "::error::ride_records_read() is for the UDS server only: src/features/uds/uds_server.c"
             exit 1
           fi
-          # D-093 M7<->M4 mailbox: the HSEM interface is used by the mailbox glue only (one
-          # accessing context per slot per core; nothing but the locked-section helpers runs
-          # while a take holds the interrupt mask), the pure core stays HAL- and feature-free,
-          # one offer call site (com_send(), committed frames only) and one step call site
-          # (the comms pass), and only the mailbox modules see the generated layout.
-          if grep -rnE --include='*.c' --include='*.h' '#include[[:space:]]+"hal/hsem\.h"' src \
-              | grep -vE '^src/(services/mailbox\.c|hal/)'; then
-            echo "::error::hal/hsem.h is for src/services/mailbox.c (and hal/) only"
-            exit 1
-          fi
-          if grep -rnE --include='*.c' --include='*.h' 'hal_hsem_(take|release|barrier|release_own)[[:space:]]*\(' src \
-              | grep -vE '^src/(services/mailbox\.c|hal/)'; then
-            echo "::error::the HSEM functions are called by src/services/mailbox.c only"
-            exit 1
-          fi
-          if grep -nE '#include[[:space:]]+"(hal|features)/' src/services/mailbox_core.c src/services/mailbox_core.h; then
-            echo "::error::services/mailbox_core is pure: no hal/ or features/ include"
-            exit 1
-          fi
-          if grep -rnE --include='*.c' --include='*.h' 'mailbox_offer[[:space:]]*\(' src \
-              | grep -vE '^src/services/(com\.c|mailbox\.(c|h)):'; then
-            echo "::error::mailbox_offer() has one call site: src/services/com.c (committed frames only)"
-            exit 1
-          fi
-          # com_send() feeds mailbox_offer(), so its callers must all be comms-task senders
-          # (one accessing context per mailbox slot on the M7, safety-reviewer NIT-1): a new
-          # sender, e.g. 0x120, is added here only once it runs in the comms task.
+          # D-118: com_send() callers are the comms-task senders only (one accessing context
+          # per TX buffer / E2E state); a new platform sender is added here once it runs there.
           if grep -rnE --include='*.c' --include='*.h' 'com_send[[:space:]]*\(' src \
-              | grep -vE '^src/(services/(com|mailbox)\.(c|h)|features/(heartbeat/heartbeat|cornering/lean_tx|vehicle_republish/vehicle_republish)\.c):'; then
+              | grep -vE '^src/(services/com\.(c|h)|features/(heartbeat/heartbeat|cornering/lean_tx|vehicle_republish/vehicle_republish)\.c):'; then
             echo "::error::com_send() callers are the comms-task senders only (heartbeat, lean_tx, vehicle_republish)"
             exit 1
           fi
-          if grep -rnE --include='*.c' --include='*.h' 'mailbox_step[[:space:]]*\(' src \
-              | grep -vE '^src/(app/comms\.c|services/mailbox\.(c|h)):'; then
-            echo "::error::mailbox_step() has one call site: src/app/comms.c (the comms task)"
+          # D-118: the H755 mailbox and HSEM are retired; nothing may bring them back.
+          if grep -rniE --include='*.c' --include='*.h' 'hsem|platform_mailbox|services/mailbox' src; then
+            echo "::error::the inter-core mailbox / HSEM is retired (D-118)"
             exit 1
           fi
-          if grep -rnE --include='*.c' --include='*.h' '#include[[:space:]]+"(platform_mailbox|services/mailbox(_core)?)\.h"' src \
-              | grep -vE '^src/(services/(mailbox|mailbox_core|com)\.(c|h)|app/(comms\.c|host/))'; then
-            echo "::error::the mailbox layout and services are included by services/mailbox*, services/com.c and app/comms.c only"
+          # D-118 (safety review MINOR-4): platform TX goes through com_send() only (the UDS
+          # link keeps its own write); nobody else may put a frame on FDCAN2.
+          if grep -rnE --include='*.c' --include='*.h' 'can_if_write[[:space:]]*\(' src \
+              | grep -vE '^src/(features/uds/isotp_link\.(c|h)|services/(com|can_if)\.(c|h)):'; then
+            echo "::error::can_if_write() is called by features/uds/isotp_link and services/com only"
+            exit 1
+          fi
+          # The safety MCU's own IDs (0x023, 0x082) appear nowhere in src/: rt-core neither
+          # sends nor registers them. Allow-list one file here later if a 0x082
+          # heartbeat-lost monitor needs the ID for RX.
+          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_(SAFETY_WARNING_STATUS|HEARTBEAT_SAFETY)_FRAME_ID' src; then
+            echo "::error::0x023 / 0x082 belong to the safety MCU: their frame IDs must not appear in src/"
+            exit 1
+          fi
+          # 0x120 SafetyRequest: at most one future sender file (none today), which never
+          # registers a receiver (it must not be filled from a received frame).
+          req=$(grep -rlE --include='*.c' --include='*.h' 'PLATFORM_SAFETY_REQUEST_|platform_safety_request_pack' src || true)
+          if [ "$(echo "$req" | grep -c .)" -gt 1 ]; then
+            echo "::error::PLATFORM_SAFETY_REQUEST_ / platform_safety_request_pack in more than one file: $req"
+            exit 1
+          fi
+          if [ -n "$req" ] && grep -nE 'can_if_register_rx' $req; then
+            echo "::error::the 0x120 sender must not register a platform receiver"
+            exit 1
+          fi
+          # The two retired mailbox DTCs are never reported (safety review MINOR-5).
+          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' src \
+              | grep -vE '^src/services/diag\.c:'; then
+            echo "::error::the SAFETY_MAILBOX DTC indices appear in src/services/diag.c only (never reported, D-118)"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' tests \
+              | grep -vE '^tests/host/(test_diag|test_platform_tx)\.c:'; then
+            echo "::error::the SAFETY_MAILBOX DTC indices appear in tests/host/test_diag.c and test_platform_tx.c only"
             exit 1
           fi
 

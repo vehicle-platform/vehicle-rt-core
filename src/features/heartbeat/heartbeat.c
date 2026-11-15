@@ -11,6 +11,9 @@
 #include <string.h>
 
 _Static_assert(PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS > 0u, "a zero cycle time would send every pass");
+_Static_assert((PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS % PLATFORM_EKF_LEAN_CYCLE_TIME_MS) == 0u,
+               "0x081's cycle must be a multiple of 0x020's for the half-cycle stagger to hold");
+_Static_assert((PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u) > 0u, "the stagger offset must not be zero");
 
 /* D-064 item 1: the DTC monitors' results, and their conditions read directly so that a
  * monitor that did not run (UDS server not stepped) never reads as healthy. */
@@ -41,7 +44,14 @@ static void send(heartbeat_t* hb, uint32_t now, bool ekf_stalled)
         hb->e2e = next; /* the counter advances with accepted frames only */
     }
     if (finished) {
+        const bool first = !hb->cycle.started;
         com_cycle_done(&hb->cycle, now, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
+        if (first) {
+            /* D-118: 0x081 (100 ms) and 0x020 (20 ms) would coincide every 100 ms; the first
+             * frame (INIT) goes out at once, the schedule then runs half a 0x020 cycle
+             * behind it so the two never share a pass (the G474 RX FIFOs are 3 deep). */
+            hb->cycle.next_due_ms += (uint32_t)PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u;
+        }
     }
 }
 

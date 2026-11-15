@@ -17,7 +17,7 @@ Every ID, length, choice value, cycle time and E2E parameter comes from gen/ (`p
 - **`NODE_MODE`**
   - **INIT** for a frame built in the first step after `heartbeat_open()`, before any comms pass completed (so before the monitors of that pass ran).
   - **DEGRADED** while `heartbeat_fault_active()`:
-    - a DTC monitor's last result is failed (`diag_fault_active()`: U0100-00 VEHICLE_ECU_COMM_LOST, U3000-00 VEHICLE_TESTER_LATCHED, U0001-88 VEHICLE_BUS_OFF_LATCHED; the mailbox DTCs U0300-00 / U3000-87 are diagnostic only and never count, D-093 amendment 3 addendum), or
+    - a DTC monitor's last result is failed (`diag_fault_active()`: U0100-00 VEHICLE_ECU_COMM_LOST, U3000-00 VEHICLE_TESTER_LATCHED, U0001-88 VEHICLE_BUS_OFF_LATCHED; the generated SAFETY_MAILBOX DTCs U0300-00 / U3000-87 are diagnostic only, never count and are no longer reported, D-118), or
     - one of these conditions holds although its monitor did not run (architecture-guard MAJOR-1: U3000-00 supervision and U0001-88 are evaluated in `uds_server_step()`): the vehicle tester status is latched or reads NOT_RUNNING (missing or stale, `diag_vehicle_tester()`), or the vehicle CAN port is latched (`can_sm`). An unknown port state is not a latch: the UDS client then sees no answers and fails U0100-00 on its own, or
     - **the EKF stalled** (`ekf_stalled`, D-064 item 4, D-065 item 2): `app/comms` samples the registered EKF's alive counter (`services/alive`) every pass and passes the verdict to `heartbeat_step()`. Stalled means the counter did not change for more than `COMMS_EKF_ALIVE_WINDOW_MS` (gen/ `PLATFORM_EKF_LEAN_E2E_TIMEOUT_MS`, 60 ms = three EKF cycles), or never changed since the EKF was registered (registered but never ran: no grace time). It is not a DTC: it degrades NODE_MODE but adds no onset. Without a registered EKF it is false; a NULL supervision object reads as stalled, and so does a registered EKF whose lean sender is not open (a failed `lean_tx_open()` or no sender; D-086, ISSUES E-22 (1)).
   - **NORMAL** otherwise.
@@ -30,7 +30,7 @@ Every ID, length, choice value, cycle time and E2E parameter comes from gen/ (`p
 
 ## Timing and order
 
-- **Cycle:** deadline-anchored at the gen/ cycle time (`services/com_core`). The first frame goes out at the first step. A late pass skips missed deadlines, never a burst.
+- **Cycle:** deadline-anchored at the gen/ cycle time (`services/com_core`). The first frame goes out at the first step; the schedule then runs half a 0x020 cycle (10 ms) behind it, so 0x081 never shares a pass with 0x020 (D-118, the safety MCU's RX FIFOs are 3 deep): the second frame is 110 ms after the first, then every 100 ms. A late pass skips missed deadlines, never a burst.
 - **Order:** `app/comms` `comms_pass()`: platform `can_sm_step()` → `can_if_dispatch()` → `vehicle_republish_step()` → `heartbeat_step()` → `uds_server_step()`.
   - It sees the platform port's current state, and its E2E frame never waits behind server work (as D-056 item 4 for 0x021).
   - It sees the DTC results that the server's monitors reported in the previous pass (1 ms), and reads their conditions directly as well.

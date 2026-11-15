@@ -28,10 +28,13 @@ static bool steps_seen;
 static bool steps_lost; /* sticky like tester_lost, until the next write */
 
 /* The heartbeat class of a DTC (D-064 item 1, D-093 amendment 3 addendum, user
- * 2026-11-05): the mailbox DTCs describe the M4 partition, not rt-core, so they are
- * diagnostic only: they set their status bytes but neither DEGRADED nor ERROR_COUNT
- * (as safety-node never names rt-core for its own faults, D-101 item 1). Every other
- * DTC counts; a new DTC is classified here first. */
+ * 2026-11-05): the SAFETY_MAILBOX_* DTCs describe the safety partition, not rt-core, so
+ * they are diagnostic only: they set their status bytes but neither DEGRADED nor
+ * ERROR_COUNT (as safety-node never names rt-core for its own faults, D-101 item 1).
+ * D-118: the mailbox is retired and nothing reports these two DTCs any more (they stay
+ * in gen/ until the defs follow-up replaces them); the classification stays so a stray
+ * report still cannot degrade the heartbeat. Every other DTC counts; a new DTC is
+ * classified here first. */
 static bool counts_for_heartbeat(uint32_t idx)
 {
     return (idx != (uint32_t)PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH) &&

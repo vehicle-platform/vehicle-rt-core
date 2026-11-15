@@ -7,8 +7,8 @@
  * reports (0xFD00, 0xFD02; D-040, D-055). The UDS client glue writes the status, the
  * step counters and its DTC results; the UDS server glue reads them, clears the DTCs and
  * reports its own monitors (VEHICLE_TESTER_LATCHED supervision, VEHICLE_BUS_OFF_LATCHED
- * from services/can_sm); services/mailbox reports the two diagnostic-only mailbox DTCs
- * every initialised step (D-093 amendment 3). Neither feature includes the other, and
+ * from services/can_sm). D-118: the two diagnostic-only SAFETY_MAILBOX_* DTCs of the retired
+ * mailbox are never reported. Neither feature includes the other, and
  * diag includes no other service.
  *
  * DTCs are the gen/ table (platform_uds.h, platform_uds_dtcs[]), indexed by
