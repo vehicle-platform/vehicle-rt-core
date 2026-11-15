@@ -200,6 +200,28 @@ static void arm_response(uds_client_t* client)
     isotp_link_expect_response_prefix(&client->link, prefix, prefix_len, max_ff_dl);
 }
 
+/* The link withheld a Flow Control (a First Frame it did not answer): the core ends the
+ * pending request and holds. Taken more than once per pass, so two are both reported. */
+static void report_withheld(uds_client_t* client, uint32_t now)
+{
+    if (isotp_link_take_fc_withheld(&client->link)) {
+        uds_client_core_on_fc_withheld(&client->core, now,
+                                       isotp_link_fc_withheld_first_byte(&client->link));
+    }
+}
+
+/* The can_if guard refused a vehicle frame. The link's own refused counter is not watched: a
+ * refused request is caught by isotp_link_send(), and a withheld Flow Control is not a
+ * refusal (isotp_link_take_fc_withheld()). */
+static void check_guard(uds_client_t* client)
+{
+    const uint32_t guard_refused = can_if_tx_refused_count(CAN_PORT_VEHICLE);
+    if (guard_refused != client->guard_refused_seen) {
+        client->guard_refused_seen = guard_refused;
+        latch(client, UDS_CLIENT_FAULT_GUARD);
+    }
+}
+
 void uds_client_step(uds_client_t* client)
 {
     if ((client == NULL) || !client->open) {
@@ -211,11 +233,22 @@ void uds_client_step(uds_client_t* client)
         client->foreign_seen = foreign_frames;
         latch(client, UDS_CLIENT_FAULT_FOREIGN_TESTER); /* before anything is sent */
     }
-    take_indication(client, now);
-    if (isotp_link_take_fc_withheld(&client->link)) {
-        uds_client_core_on_fc_withheld(&client->core, now,
-                                       isotp_link_fc_withheld_first_byte(&client->link));
+    report_withheld(client, now); /* one from the late step of the last pass: before a second */
+    /* The link decides a received First Frame's Flow Control (sent, or withheld and the
+     * reception cancelled) when it steps. Step it before the poll while a reception runs, so
+     * a withheld First Frame is no running reception when the poll looks (a message queued
+     * outside the client keeps its place) (ISSUES E-16 (3), D-116): First Frames in every
+     * step would otherwise keep rx_busy set at every poll and starve the tester although
+     * every hold has expired. Not in the step where the total cap of the pending request
+     * expired: the poll must end that request first (and close the response), so such a First
+     * Frame is withheld as before. A First Frame above the buffer (FC.OVFLW) starts no
+     * reception: it is decided in the late step and reported in the next pass. */
+    if (isotp_link_rx_busy(&client->link) && !uds_client_core_response_cap_expired(&client->core, now)) {
+        isotp_link_step(&client->link);
+        check_guard(client); /* a refusal here latches before the poll can send */
     }
+    take_indication(client, now);
+    report_withheld(client, now);
     isotp_n_result_t conf = ISOTP_N_OK;
     (void)isotp_link_take_tx_confirm(&client->link, &conf); /* a Single Frame cannot fail */
 
@@ -251,14 +284,7 @@ void uds_client_step(uds_client_t* client)
     }
     isotp_link_step(&client->link);
 
-    /* The can_if guard refused a vehicle frame. The link's own refused counter is not
-     * watched: a refused request is caught by isotp_link_send(), and a withheld Flow
-     * Control is not a refusal (isotp_link_take_fc_withheld() above). */
-    const uint32_t guard_refused = can_if_tx_refused_count(CAN_PORT_VEHICLE);
-    if (guard_refused != client->guard_refused_seen) {
-        client->guard_refused_seen = guard_refused;
-        latch(client, UDS_CLIENT_FAULT_GUARD);
-    }
+    check_guard(client);
     const bool present = uds_client_core_ecu_present(&client->core, now);
     vehicle_signals_set_ecu_present(present);
     uint16_t epoch_counter = 0u;
