@@ -194,9 +194,11 @@ jobs:
             echo "::error::can_if_write() is called by features/uds/isotp_link and services/com only"
             exit 1
           fi
-          # The safety MCU's own IDs are never rt-core TX buffers.
-          if grep -rnE --include='*.c' --include='*.h' 'can_if_register_tx_dedicated[^;]*PLATFORM_(SAFETY_WARNING_STATUS|HEARTBEAT_SAFETY)_FRAME_ID' src; then
-            echo "::error::0x023 / 0x082 belong to the safety MCU: never a dedicated TX ID of rt-core"
+          # The safety MCU's own IDs (0x023, 0x082) appear nowhere in src/: rt-core neither
+          # sends nor registers them. Allow-list one file here later if a 0x082
+          # heartbeat-lost monitor needs the ID for RX.
+          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_(SAFETY_WARNING_STATUS|HEARTBEAT_SAFETY)_FRAME_ID' src; then
+            echo "::error::0x023 / 0x082 belong to the safety MCU: their frame IDs must not appear in src/"
             exit 1
           fi
           # 0x120 SafetyRequest: at most one future sender file (none today), which never

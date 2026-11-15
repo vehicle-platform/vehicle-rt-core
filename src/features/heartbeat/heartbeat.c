@@ -11,6 +11,9 @@
 #include <string.h>
 
 _Static_assert(PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS > 0u, "a zero cycle time would send every pass");
+_Static_assert((PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS % PLATFORM_EKF_LEAN_CYCLE_TIME_MS) == 0u,
+               "0x081's cycle must be a multiple of 0x020's for the half-cycle stagger to hold");
+_Static_assert((PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u) > 0u, "the stagger offset must not be zero");
 
 /* D-064 item 1: the DTC monitors' results, and their conditions read directly so that a
  * monitor that did not run (UDS server not stepped) never reads as healthy. */

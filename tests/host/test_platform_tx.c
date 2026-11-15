@@ -156,7 +156,7 @@ static void inject_frames(uint32_t now)
         f.id = plain[k];
         f.dlc = 8u;
         f.data[1] = (uint8_t)(now & 0x0Fu);
-        (void)vbus_send(&bus_p, node_peer, &f);
+        TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &f)); /* positive control */
     }
     struct platform_safety_request_t msg;
     (void)platform_safety_request_init(&msg);
@@ -171,7 +171,7 @@ static void inject_frames(uint32_t now)
         e2e_ready = true;
     }
     TEST_ASSERT_EQUAL(VEHICLE_E2E_OK, platform_safety_request_e2e_protect(r.data, r.dlc, &e2e));
-    (void)vbus_send(&bus_p, node_peer, &r);
+    TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &r));
 }
 
 /* RUN_MS passes of 1 ms. inject: the peer sends 0x023, 0x082 and 0x120 every 20 ms. */
