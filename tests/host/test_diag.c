@@ -335,7 +335,8 @@ static void test_supervise_of_a_missing_status_is_one_onset(void)
     TEST_ASSERT_EQUAL_UINT32(1u, diag_fault_onsets());
 }
 
-/* D-093 amendment 3 addendum (user 2026-11-05): the mailbox DTCs are diagnostic only. */
+/* D-093 amendment 3 addendum (user 2026-11-05): the mailbox DTCs are diagnostic only. D-118:
+ * nothing reports them any more; a stray report still must not count for the heartbeat. */
 static void test_the_mailbox_dtcs_set_their_status_but_not_the_heartbeat_summary(void)
 {
     diag_init(0u);
