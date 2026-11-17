@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     # Pinned, like the cppcheck cache key below. A normal run takes about 1 min; one apt
