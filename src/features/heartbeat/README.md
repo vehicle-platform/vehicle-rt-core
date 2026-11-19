@@ -14,6 +14,8 @@ Every ID, length, choice value, cycle time and E2E parameter comes from gen/ (`p
 
 ## Fields (D-064)
 
+Since defs v0.29.0 (D-108) the DBC signals are named `RT_CORE_NODE_MODE`, `RT_CORE_ERROR_COUNT` and `RT_CORE_UPTIME` (generated `rt_core_node_mode` etc.); the headings below keep the short role names. Frame bytes are unchanged.
+
 - **`NODE_MODE`**
   - **INIT** for a frame built in the first step after `heartbeat_open()`, before any comms pass completed (so before the monitors of that pass ran).
   - **DEGRADED** while `heartbeat_fault_active()`:

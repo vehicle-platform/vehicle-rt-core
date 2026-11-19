@@ -807,24 +807,24 @@ static void test_comms_heartbeat_reads_normal_until_a_silent_ecu_arms_u0100(void
             struct platform_heartbeat_rt_core_t m;
             sim_listener_heartbeat_decode(got.data, &m);
             frames++;
-            if (m.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE) {
+            if (m.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE) {
                 TEST_ASSERT_EQUAL_UINT32_MESSAGE(1u, frames, "INIT only on the first frame");
                 init++;
             } else if (!degraded) {
-                if (m.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
+                if (m.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
                     degraded = true;
                     degraded_at_ms = timebase_now_ms() - open_ms;
-                    error_count = m.error_count;
+                    error_count = m.rt_core_error_count;
                 } else {
-                    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE,
-                                            m.node_mode);
-                    TEST_ASSERT_EQUAL_UINT8(0u, m.error_count);
+                    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE,
+                                            m.rt_core_node_mode);
+                    TEST_ASSERT_EQUAL_UINT8(0u, m.rt_core_error_count);
                     normal++;
                 }
             } else {
-                TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE,
-                                        m.node_mode);
-                TEST_ASSERT_EQUAL_UINT8(error_count, m.error_count); /* one onset, no flapping */
+                TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE,
+                                        m.rt_core_node_mode);
+                TEST_ASSERT_EQUAL_UINT8(error_count, m.rt_core_error_count); /* one onset, no flapping */
             }
         }
         hal_time_host_advance(1u);
@@ -867,9 +867,9 @@ static struct platform_heartbeat_rt_core_t run_comms(uint32_t ms, bool client_ru
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
             if (got.id == PLATFORM_HEARTBEAT_RT_CORE_FRAME_ID) {
                 sim_listener_heartbeat_decode(got.data, &last);
-                *normal += (last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
+                *normal += (last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
                 *degraded +=
-                    (last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
+                    (last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
             }
         }
         hal_time_host_advance(1u);
@@ -897,8 +897,8 @@ static void test_comms_each_client_stall_is_one_onset_and_the_writers_never_flap
     uint32_t normal = 0u;
     uint32_t degraded = 0u;
     struct platform_heartbeat_rt_core_t m = run_comms(1000u, true, &normal, &degraded);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, m.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(0u, m.error_count);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, m.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(0u, m.rt_core_error_count);
     TEST_ASSERT_EQUAL_UINT32(0u, degraded);
 
     const uint32_t stalls = 3u;
@@ -907,13 +907,13 @@ static void test_comms_each_client_stall_is_one_onset_and_the_writers_never_flap
         degraded = 0u;
         m = run_comms(PLATFORM_UDS_VEHICLE_TESTER_STATUS_MAX_AGE_MS + 100u, false, &normal,
                       &degraded);
-        TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, m.node_mode);
-        TEST_ASSERT_EQUAL_UINT8((uint8_t)k, m.error_count);
+        TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, m.rt_core_node_mode);
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)k, m.rt_core_error_count);
         normal = 0u;
         degraded = 0u;
         m = run_comms(1000u, true, &normal, &degraded);
-        TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, m.node_mode);
-        TEST_ASSERT_EQUAL_UINT8((uint8_t)k, m.error_count); /* no onset from the resume */
+        TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, m.rt_core_node_mode);
+        TEST_ASSERT_EQUAL_UINT8((uint8_t)k, m.rt_core_error_count); /* no onset from the resume */
         TEST_ASSERT_LESS_OR_EQUAL_UINT32(1u, degraded);       /* at most the frame before it */
     }
     TEST_ASSERT_FALSE(uds_client_failed(&client));

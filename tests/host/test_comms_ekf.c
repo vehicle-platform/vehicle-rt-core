@@ -118,10 +118,10 @@ static hb_seen_t run(uint32_t ms, bool ekf_runs, comms_ekf_t* e)
             }
             sim_listener_heartbeat_decode(got.data, &seen.last);
             seen.frames++;
-            if (seen.last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) {
+            if (seen.last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) {
                 seen.normal++;
                 seen.first_normal_ms = (seen.first_normal_ms == 0u) ? now : seen.first_normal_ms;
-            } else if (seen.last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
+            } else if (seen.last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
                 seen.degraded++;
                 seen.first_degraded_ms = (seen.first_degraded_ms == 0u) ? now : seen.first_degraded_ms;
             } else {
@@ -149,7 +149,7 @@ static void test_a_registered_ekf_that_never_ran_reads_degraded_from_the_first_c
     const hb_seen_t s = run(1000u, false, &ekf);
     TEST_ASSERT_EQUAL_UINT32(0u, s.normal);
     TEST_ASSERT_EQUAL_UINT32(s.frames - 1u, s.degraded);
-    TEST_ASSERT_EQUAL_UINT8(0u, s.last.error_count); /* not a DTC onset */
+    TEST_ASSERT_EQUAL_UINT8(0u, s.last.rt_core_error_count); /* not a DTC onset */
 }
 
 static void test_the_baseline_is_the_count_at_registration_not_zero(void)
@@ -178,7 +178,7 @@ static void test_a_running_ekf_reads_normal_and_a_stall_degrades_within_the_wind
     TEST_ASSERT_GREATER_THAN_UINT32(last_bump_ms + COMMS_EKF_ALIVE_WINDOW_MS, s.first_degraded_ms);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(last_bump_ms + COMMS_EKF_ALIVE_WINDOW_MS + 1u + HB_CYCLE_MS,
                                      s.first_degraded_ms);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
 
     /* the EKF resumes: NORMAL from the next heartbeat cycle on */
     const uint32_t resume_ms = timebase_now_ms();
@@ -186,7 +186,7 @@ static void test_a_running_ekf_reads_normal_and_a_stall_degrades_within_the_wind
     TEST_ASSERT_NOT_EQUAL_UINT32(0u, s.first_normal_ms);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(resume_ms + EKF_CYCLE_MS + HB_CYCLE_MS, s.first_normal_ms);
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(1u, s.degraded); /* at most the frame before the resume */
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
 }
 
 static void test_one_late_ekf_cycle_is_not_a_stall(void)
