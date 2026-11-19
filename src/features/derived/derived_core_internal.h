@@ -2,9 +2,10 @@
 #define FEATURES_DERIVED_DERIVED_CORE_INTERNAL_H
 
 /*
- * Private interface between derived_core.c (scheduler, grid, ring storage, class-A point and
- * integral formulas, output store) and derived_d103.c (the D-103 class-A formulas, their
- * sample history and event state machines). Only the files in features/derived may include
+ * Private interface between derived_core.c (time helpers, ring storage, input access, integrals,
+ * output store), derived_formulas.c (class-A point formulas), derived_step.c (scheduler),
+ * derived_init.c (which signals are computed) and derived_d103.c (the D-103 class-A formulas,
+ * their sample history and event state machines). Only the files in features/derived may include
  * it (CI layering check); everything else uses derived_core.h.
  */
 
@@ -38,6 +39,14 @@ typedef struct {
     const vehicle_cl250_derived_t* spec;
 } derived_ctx_t;
 
+/* Window statistics over a ring: count, mean and least-squares slope per second. */
+typedef struct {
+    uint32_t n;
+    float mean;
+    float slope_per_s;
+    bool slope_ok;
+} win_t;
+
 /* ---- provided by derived_core.c --------------------------------------------------------- */
 
 /* Wrap-safe time helpers and the finite check. */
@@ -55,6 +64,31 @@ derived_flag_t derived_core_derived_value(const derived_ctx_t* x, uint32_t sig, 
 
 /* Stores an output (range check, status, sequence, ride accumulation). */
 void derived_core_store(derived_core_t* c, uint32_t sig, uint32_t stamp, derived_flag_t flag, float value);
+
+/* Helpers shared by the core, formulas, step and init units (moved out of one file, same code). */
+uint32_t later(uint32_t a, uint32_t b);
+bool is_zero(float x);
+uint32_t kind_of(uint32_t sig);
+uint32_t ring_of_did(uint32_t did);
+void win_collect(derived_core_t* c, uint32_t id, uint32_t now, uint32_t window_ms, float scale,
+                 bool want_slope, win_t* w);
+derived_flag_t did_fresh(const derived_core_t* c, uint32_t did, uint32_t now, uint32_t limit,
+                         float* v);
+derived_flag_t did_window(const derived_ctx_t* x, uint32_t did, float scale, bool want_slope, win_t* w);
+void integral_update(derived_core_t* c, uint32_t sig);
+derived_flag_t eval_integral(const derived_ctx_t* x, float* out);
+
+/* Signal kinds (derived_core.c kind_of()). */
+#define KIND_NONE (0u)
+#define KIND_POINT (1u)
+#define KIND_INTEGRAL (2u)
+#define KIND_EVENT (3u)
+#define KIND_RIDE (4u)
+
+/* ---- provided by derived_formulas.c ----------------------------------------------------- */
+
+bool dq_bits_cover_dids(void);
+derived_flag_t eval_point(const derived_ctx_t* x, float* out);
 
 /* ---- provided by derived_d103.c --------------------------------------------------------- */
 
