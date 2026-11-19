@@ -18,9 +18,11 @@
  * and the 17 D-079 window summaries (derived_windows.h): the statistics of the first qualifying
  * instance of W1..W5 and the qualifying counts (window_key_on_*, window_crank_count,
  * window_warm_idle_*, window_cruise_count, window_post_stop_*).
- * ride_aggressiveness_score and throttle_torque_lag need every sample of the ride (a p95 and a
- * median over every step): NOT_COMPUTED, DERIVED_NC_UNBOUNDED. Binned, per-gear, sensor-input,
- * the 12 window signals the reference does not compute and the other class-B signals are NOT_COMPUTED with a reason.
+ * Plus (D-106) window_cruise_final_drive_residual, window_cruise_ve_residual and
+ * throttle_torque_lag, which is always NA (DERIVED_FLAG_POLL_TOO_SLOW) while the gen/ polls of its two
+ * DIDs cannot resolve it. ride_aggressiveness_score needs every sample of the ride (a p95):
+ * NOT_COMPUTED, DERIVED_NC_UNBOUNDED. Binned, per-gear, sensor-input,
+ * the 10 window signals the reference does not compute and the other class-B signals are NOT_COMPUTED with a reason.
  *
  * The state is a handful of scalars for the open ride plus one closed record (the previous
  * ride) with one output row per computed signal: no heap, no unbounded loop. The time
@@ -46,7 +48,7 @@
 extern "C" {
 #endif
 
-#define DERIVED_RIDE_SLOTS (42u)
+#define DERIVED_RIDE_SLOTS (45u)
 #define DERIVED_RIDE_FLAG_TIMES (3u) /* cold abuse, over rev, lugging */
 /* Grid class-A outputs whose rows wait for the reference's grid end (see derived_ride_advance). */
 #define DERIVED_RIDE_TAILS (6u)

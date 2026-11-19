@@ -4,6 +4,7 @@
  */
 #include "features/derived/derived_windows.h"
 
+#include "features/derived/derived_gear.h"
 #include "vehicle_cl250_constants.h"
 
 #include <math.h>
@@ -93,6 +94,20 @@ static bool wants_stat(uint32_t wi, uint32_t did)
 
 #define STAT_DID_COUNT (7u)
 
+/* The derived rows whose samples inside a window feed a statistic (D-106, W4 only): the measured
+ * gearbox ratio (final-drive residual, with the gear at its time) and the volumetric efficiency. */
+static bool wants_stat_derived(uint32_t wi, uint32_t sig)
+{
+    return (wi == (uint32_t)VEHICLE_CL250_WINDOW_W4_CRUISE) &&
+           ((sig == (uint32_t)VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED) ||
+            (sig == (uint32_t)VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY));
+}
+
+static bool wants_stat_row(uint32_t wi, uint8_t kind, uint32_t index)
+{
+    return (kind == VEHICLE_CL250_DERIVED_INPUT_DID) ? wants_stat(wi, index) : wants_stat_derived(wi, index);
+}
+
 /* ---- gen/ checks ------------------------------------------------------------------------------ */
 
 uint32_t derived_windows_of_signal(uint32_t sig)
@@ -125,6 +140,8 @@ bool derived_windows_has_summary(uint32_t sig)
     case VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_STFT_STD:
     case VEHICLE_CL250_DERIVED_WINDOW_WARM_IDLE_COUNT:
     case VEHICLE_CL250_DERIVED_WINDOW_CRUISE_COUNT:
+    case VEHICLE_CL250_DERIVED_WINDOW_CRUISE_FINAL_DRIVE_RESIDUAL:
+    case VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL:
     case VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_TAU:
     case VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_START:
     case VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_END:
@@ -169,7 +186,7 @@ static bool events_fit(void)
     for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
         bool wanted = false;
         for (uint32_t wi = 0u; wi < DERIVED_WINDOWS_COUNT; wi++) {
-            wanted = wanted || window_reads(wi, VEHICLE_CL250_DERIVED_INPUT_DERIVED, sig);
+            wanted = wanted || window_reads(wi, VEHICLE_CL250_DERIVED_INPUT_DERIVED, sig) || wants_stat_derived(wi, sig);
         }
         n += wanted ? 1u : 0u;
     }
@@ -211,7 +228,28 @@ bool derived_windows_sizing_ok(uint32_t w, uint32_t rpm_hist_cap)
             need += (((max_stale + 1u) + (poll - 1u)) / poll) + 1u;
         }
     }
+    for (uint32_t sig = 0u; sig < VEHICLE_CL250_DERIVED_COUNT; sig++) {
+        if (wants_stat_derived(w, sig)) {
+            const uint32_t poll = vehicle_cl250_derived[sig].period_ms;
+            if (poll == 0u) {
+                return false;
+            }
+            need += (((max_stale + 1u) + (poll - 1u)) / poll) + 1u;
+        }
+    }
     bool ok = (need <= DERIVED_WINDOWS_PEND_CAP) && events_fit();
+    if (w == VEHICLE_CL250_WINDOW_W4_CRUISE) {
+        /* the final-drive median keeps every ratio row of the longest instance, and needs the gear
+         * estimate as a window channel (read at the time of each ratio row) */
+        const uint32_t poll = vehicle_cl250_derived[VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED].period_ms;
+        bool gear_ch = false;
+        for (uint32_t k = 0u; k < spec->condition_count; k++) {
+            gear_ch = gear_ch || ((spec->conditions[k].input.kind == VEHICLE_CL250_DERIVED_INPUT_DERIVED) &&
+                                  ((uint32_t)spec->conditions[k].input.index == (uint32_t)VEHICLE_CL250_DERIVED_GEAR_ESTIMATE));
+        }
+        ok = ok && gear_ch && (poll != 0u) && (spec->max_duration_ms != 0u) &&
+             (((spec->max_duration_ms / poll) + 2u) <= DERIVED_WIN_CRUISE_RATIO_CAP);
+    }
     if (w == VEHICLE_CL250_WINDOW_W3_WARM_IDLE) {
         /* the warm-idle RPM statistics read the core's ENGINE_SPEED history: it must hold every
          * sample of the longest instance */
@@ -427,7 +465,24 @@ static void apply_item(derived_windows_t* a, uint32_t wi, const derived_win_item
         return;
     }
     const double v = (double)it->v;
-    switch (it->did) {
+    if (it->kind == VEHICLE_CL250_DERIVED_INPUT_DERIVED) {
+        if (it->index == (uint8_t)VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY) {
+            add_mean(st, DERIVED_WIN_MEAN_VE, v);
+        } else if (st->ratio_n < DERIVED_WIN_CRUISE_RATIO_CAP) {
+            /* a final-drive estimate: ordered insert, so the median needs no sort */
+            uint32_t j = st->ratio_n;
+            while ((j > 0u) && (a->ratio_buf[j - 1u] > it->v)) {
+                a->ratio_buf[j] = a->ratio_buf[j - 1u];
+                j--;
+            }
+            a->ratio_buf[j] = it->v;
+            st->ratio_n++;
+        } else {
+            w->broken = true; /* never a wrong median */
+        }
+        return;
+    }
+    switch (it->index) {
     case (uint8_t)VEHICLE_CL250_IDX_BATTERY_VOLTAGE:
         add_mean(st, DERIVED_WIN_MEAN_BATTERY, v);
         break;
@@ -771,11 +826,38 @@ static void feed_chan(derived_windows_t* a, uint32_t wi, uint32_t ci, uint32_t t
     }
 }
 
-static void feed_stat(derived_windows_t* a, uint32_t wi, uint32_t did, uint32_t t, float v)
+/* The final-drive estimate of a measured gearbox ratio at time `t` (D-106): measured x
+ * secondary_reduction_ratio / gear_ratio_n with the gear_estimate row at or before `t` (not
+ * stale, valid, not no_gear). False without such a gear. */
+static bool final_drive_estimate(const derived_win_t* w, uint32_t t, float measured, float* est)
+{
+    bool ok = false;
+    for (uint32_t i = 0u; (i < w->nch) && (!ok); i++) {
+        const derived_win_chan_t* const c = &w->ch[i];
+        double g = 0.0;
+        if ((c->kind == VEHICLE_CL250_DERIVED_INPUT_DERIVED) && ((uint32_t)c->index == (uint32_t)VEHICLE_CL250_DERIVED_GEAR_ESTIMATE) &&
+            ch_latest(c, t, &g) && (g >= 1.0) && (g <= (double)VEHICLE_CL250_GEAR_COUNT)) {
+            const float ratio = derived_gear_ratio((uint8_t)g);
+            if (ratio > 0.0f) {
+                *est = (float)(((double)measured * (double)VEHICLE_CL250_SECONDARY_REDUCTION_RATIO) / (double)ratio);
+                ok = true;
+            }
+        }
+    }
+    return ok;
+}
+
+static void feed_stat(derived_windows_t* a, uint32_t wi, const derived_win_event_t* e)
 {
     derived_win_t* const w = &a->w[wi];
-    if (w->has_first || (!wants_stat(wi, did))) {
-        return;
+    const uint32_t t = e->t;
+    float v = e->v;
+    if (w->has_first || (!wants_stat_row(wi, e->kind, e->index)) || (!e->valid)) {
+        return; /* an invalid derived row is no sample (the reference skips None) */
+    }
+    if ((e->kind == VEHICLE_CL250_DERIVED_INPUT_DERIVED) && (e->index == (uint8_t)VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED) &&
+        (!final_drive_estimate(w, t, e->v, &v))) {
+        return; /* no valid gear at that time */
     }
     if (w->staged && after(t, w->staged_t)) {
         flush_point(a, wi);
@@ -790,7 +872,8 @@ static void feed_stat(derived_windows_t* a, uint32_t wi, uint32_t did, uint32_t 
         if (w->pend_n < DERIVED_WINDOWS_PEND_CAP) {
             w->pend[w->pend_n].t = t;
             w->pend[w->pend_n].v = v;
-            w->pend[w->pend_n].did = (uint8_t)did;
+            w->pend[w->pend_n].kind = e->kind;
+            w->pend[w->pend_n].index = e->index;
             w->pend_n++;
         } else {
             w->broken = true;
@@ -811,7 +894,7 @@ static void push(derived_windows_t* a, uint8_t kind, uint32_t index, bool valid,
         for (uint32_t i = 0u; i < w->nch; i++) {
             wanted = wanted || ((w->ch[i].kind == kind) && ((uint32_t)w->ch[i].index == index));
         }
-        wanted = wanted || ((kind == VEHICLE_CL250_DERIVED_INPUT_DID) && wants_stat(wi, index));
+        wanted = wanted || wants_stat_row(wi, kind, index);
     }
     if (!wanted) {
         return;
@@ -884,11 +967,9 @@ void derived_windows_run(derived_windows_t* a)
             feed_channels(a, &a->ev[k]);
         }
         for (uint32_t k = i; k < end; k++) { /* then the statistics samples */
-            if (a->ev[k].kind == VEHICLE_CL250_DERIVED_INPUT_DID) {
-                for (uint32_t wi = 0u; wi < DERIVED_WINDOWS_COUNT; wi++) {
-                    if (a->w[wi].enabled) {
-                        feed_stat(a, wi, a->ev[k].index, a->ev[k].t, a->ev[k].v);
-                    }
+            for (uint32_t wi = 0u; wi < DERIVED_WINDOWS_COUNT; wi++) {
+                if (a->w[wi].enabled) {
+                    feed_stat(a, wi, &a->ev[k]);
                 }
             }
         }
@@ -1078,6 +1159,22 @@ static derived_flag_t value_of(const derived_windows_t* a, uint32_t sig, const i
         if (st->stft_n >= 2u) {
             const uint32_t dof = st->stft_n - 1u;
             *out = sqrt(st->stft_m2 / (double)dof);
+        }
+        break;
+    case VEHICLE_CL250_DERIVED_WINDOW_CRUISE_FINAL_DRIVE_RESIDUAL:
+        f = (st->ratio_n > 0u) ? DERIVED_FLAG_NONE : DERIVED_FLAG_NO_DATA;
+        if (st->ratio_n > 0u) {
+            const uint32_t mid = st->ratio_n / 2u;
+            const double median = ((st->ratio_n % 2u) != 0u)
+                                      ? (double)a->ratio_buf[mid]
+                                      : (((double)a->ratio_buf[mid - 1u] + (double)a->ratio_buf[mid]) / 2.0);
+            *out = median - (double)VEHICLE_CL250_SECONDARY_REDUCTION_RATIO;
+        }
+        break;
+    case VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL:
+        f = mean_of(st, DERIVED_WIN_MEAN_VE, &m1);
+        if (f == DERIVED_FLAG_NONE) {
+            *out = m1 - (double)VEHICLE_CL250_INTAKE_FLOW_RESIDUAL_VE_REFERENCE_PCT;
         }
         break;
     case VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_START:

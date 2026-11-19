@@ -35,7 +35,8 @@ typedef enum {
     DERIVED_FLAG_STARTS_WARM = 16, /* ride_warmup_time: the coolant was warm at the start (the vector flag numbering) */
     DERIVED_FLAG_NEVER_WARM = 17,  /* ride_warmup_time: the coolant never reached the operating temperature */
     DERIVED_FLAG_NO_FAN_STEP = 19, /* ride_fan_on_temperature: no qualifying battery drop */
-    DERIVED_FLAG_NO_WINDOW = 20    /* a D-079 window summary: the ride has no qualifying instance */
+    DERIVED_FLAG_NO_WINDOW = 20,   /* a D-079 window summary: the ride has no qualifying instance */
+    DERIVED_FLAG_POLL_TOO_SLOW = 21 /* throttle_torque_lag (D-106): a lag DID is polled too slowly to resolve it */
 } derived_flag_t;
 
 typedef enum {

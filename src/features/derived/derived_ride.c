@@ -46,6 +46,9 @@ static const uint16_t slot_signal[DERIVED_RIDE_SLOTS] = {
     VEHICLE_CL250_DERIVED_WINDOW_CRUISE_COUNT,              VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_TAU,
     VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_START,   VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COOLANT_END,
     VEHICLE_CL250_DERIVED_WINDOW_POST_STOP_COUNT,
+    /* D-106: the two W4 cruise residuals and the resolvability rule of throttle_torque_lag */
+    VEHICLE_CL250_DERIVED_WINDOW_CRUISE_FINAL_DRIVE_RESIDUAL, VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL,
+    VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
 };
 
 uint32_t derived_ride_slot(uint32_t sig)
@@ -578,6 +581,9 @@ static raw_t raw_simple(const derived_ride_acc_t* a, uint32_t sig)
 {
     raw_t r = raw_flag(DERIVED_FLAG_INVALID_INPUT);
     switch (sig) {
+    case VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG:
+        r = raw_flag(DERIVED_FLAG_POLL_TOO_SLOW); /* only slotted computed when the gen/ polls cannot resolve it */
+        break;
     case VEHICLE_CL250_DERIVED_RIDE_DISTANCE:
         r = last_valid(a->has_trip_distance, a->trip_distance);
         break;

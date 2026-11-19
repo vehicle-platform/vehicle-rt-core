@@ -64,13 +64,13 @@ static const bscenario_t scenarios[] = {
 };
 #define N_SCENARIOS (sizeof scenarios / sizeof scenarios[0])
 
-/* Two D-103 class-B summaries need every sample of the ride (ride_aggressiveness_score: a p95
- * over the whole ride; throttle_torque_lag: a median over every throttle step plus a
- * cross-correlation per step), which is not bounded on the MCU. They are NOT_COMPUTED with
- * DERIVED_NC_UNBOUNDED; the golden replay asserts that exact set instead of silently skipping
- * it. The other 13 D-103 class-B summaries are computed and compared. */
+/* ride_aggressiveness_score (a p95 over the whole ride) is not bounded on the MCU: NOT_COMPUTED
+ * with DERIVED_NC_UNBOUNDED; the golden replay asserts that exact set instead of silently
+ * skipping it. throttle_torque_lag (a median over every throttle step plus a cross-correlation
+ * per step) is the same on a vehicle whose lag DIDs are polled fast enough; on the CL250 they
+ * are not (D-106 item 3), so it is computed and always NA with POLL_TOO_SLOW, and the reference
+ * has no vector for it. The other 13 D-103 class-B summaries are computed and compared. */
 static const uint16_t UNBOUNDED_CLASS_B_NOT_COMPUTED[] = {
-    VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
     VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE,
 };
 
@@ -174,6 +174,10 @@ static uint32_t n_rows;
 
 static void compare_ride(const bscenario_t* sc, uint16_t ride)
 {
+    /* D-106 item 3: the CL250's lag DIDs are polled too slowly, so every closed ride reports NA */
+    derived_out_t lag;
+    TEST_ASSERT_TRUE(derived_core_ride_out(&core, DERIVED_RIDE_PREVIOUS, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG, &lag));
+    assert_inv(lag, DERIVED_FLAG_POLL_TOO_SLOW);
     for (uint32_t r = 0u; r < sc->n_out; r++) {
         const derived_vector_b_output_t* const e = &sc->out[r];
         if (e->ride != ride) {
@@ -374,6 +378,11 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
             TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, s));
             continue;
         }
+        if (s == VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG) {
+            TEST_ASSERT_FALSE(golden[s]); /* never valid on the CL250: no vector (D-106) */
+            TEST_ASSERT_TRUE(derived_core_is_computed(&core, s));
+            continue;
+        }
         if (golden[s] != derived_core_is_computed(&core, s)) {
             fprintf(stderr, "class B signal %u: golden %d, computed %d (reason %d)\n", (unsigned)s, (int)golden[s],
                     (int)derived_core_is_computed(&core, s), (int)derived_core_reason(&core, s));
@@ -383,9 +392,9 @@ static void test_vectors_carry_no_gps_and_the_computed_set_is_the_golden_set(voi
     printf("computed set (class B): %u computed, %u in the golden vectors, %u differences\n",
            (unsigned)class_b_computed, (unsigned)n_golden, (unsigned)differences);
     TEST_ASSERT_EQUAL_UINT32(0u, differences);
-    TEST_ASSERT_EQUAL_UINT32(44u, n_golden); /* 42 computed + the 2 unbounded */
+    TEST_ASSERT_EQUAL_UINT32(45u, n_golden); /* 44 computed (42 + the two W4 residuals) + the unbounded one */
     TEST_ASSERT_EQUAL_UINT32(DERIVED_RIDE_SLOTS, class_b_computed);
-    TEST_ASSERT_EQUAL_UINT32(2u, (uint32_t)(sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED / sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED[0]));
+    TEST_ASSERT_EQUAL_UINT32(1u, (uint32_t)(sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED / sizeof UNBOUNDED_CLASS_B_NOT_COMPUTED[0]));
 }
 
 static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
@@ -395,9 +404,9 @@ static void test_other_class_b_signals_are_not_computed_with_a_reason(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_ELEMENTS, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_COOLANT_TIME_AT_TEMP));
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_ELEMENTS, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_FINAL_DRIVE_RATIO));
     const uint32_t others[] = {VEHICLE_CL250_DERIVED_RIDE_DISTANCE_GPS, VEHICLE_CL250_DERIVED_RIDE_BUS_OFF_COUNT,
-                               VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG,
+                               VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE,
                                VEHICLE_CL250_DERIVED_WINDOW_KEY_ON_PUMP_PEAK_CURRENT,
-                               VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL,
+                               VEHICLE_CL250_DERIVED_WINDOW_CRUISE_ENGINE_VIBRATION,
                                VEHICLE_CL250_DERIVED_SPEEDOMETER_ERROR};
     for (uint32_t i = 0u; i < (sizeof others / sizeof others[0]); i++) {
         TEST_ASSERT_FALSE(derived_core_is_computed(&core, others[i]));

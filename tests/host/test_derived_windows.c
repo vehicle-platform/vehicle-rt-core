@@ -376,6 +376,103 @@ static void test_an_unknown_gear_closes_the_cruise_by_condition(void)
     expect(CRUISE_COUNT, 1.0, 0.0);
 }
 
+/* D-106: the two W4 residuals. One cruise row at `t`: the gear (code `gear`), the speed and the
+ * throttle that hold the window open, plus an optional measured-ratio and VE row. */
+static void cruise_row(uint32_t t, uint32_t gear, const float* ratio, const float* ve)
+{
+    derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, true, (float)gear, t);
+    derived_windows_push_did(&W, SPEED, 60.0f, t);
+    derived_windows_push_did(&W, THROTTLE, 20.0f, t);
+    if (ratio != NULL) {
+        derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED, true, *ratio, t);
+    }
+    if (ve != NULL) {
+        derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY, true, *ve, t);
+    }
+    derived_windows_run(&W);
+}
+
+#define FD_RESIDUAL VEHICLE_CL250_DERIVED_WINDOW_CRUISE_FINAL_DRIVE_RESIDUAL
+#define VE_RESIDUAL VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL
+
+/* median x secondary / gear ratio: gear 4 (1.35) at k = 1.01, gear 6 (1.038) at k = 1.03, gear 4
+ * at k = 1.02: the estimates are 2.642 x k, median 2.642 x 1.02, residual 2.642 x 0.02. A fourth
+ * sample (k = 1.05, 5 s) makes the median the mean of the middle two: 2.642 x 0.025. */
+static void test_the_final_drive_residual_is_the_median_of_the_per_gear_estimates(void)
+{
+    const float r1 = 1.35f * 1.01f;
+    const float r2 = 1.038f * 1.03f;
+    const float r3 = 1.35f * 1.02f;
+    const float r4 = 1.35f * 1.05f;
+    for (uint32_t t = 0u; t <= 12000u; t += 100u) {
+        const float* ratio = NULL;
+        uint32_t gear = 4u;
+        if (t == 1000u) {
+            ratio = &r1;
+        } else if (t == 2000u) {
+            ratio = &r2;
+            gear = 6u;
+        } else if (t == 3000u) {
+            ratio = &r3;
+        } else if (t == 5000u) {
+            ratio = &r4;
+        } else {
+            ratio = NULL; /* the 4 gear rows of 100 ms steps hold the window open */
+        }
+        cruise_row(t, gear, ratio, NULL);
+    }
+    derived_windows_end(&W);
+    expect(FD_RESIDUAL, 2.642 * 0.025, 1.0e-4);
+    expect_flag(VE_RESIDUAL, DERIVED_FLAG_NO_DATA); /* a window without a VE row */
+}
+
+static void test_a_ratio_without_a_valid_gear_is_no_sample(void)
+{
+    const float r = 1.35f * 1.02f;
+    for (uint32_t t = 0u; t <= 12000u; t += 100u) {
+        cruise_row(t, 4u, NULL, NULL);
+    }
+    /* the gear row of 12100 is invalid; the window closes there and the ratio row beside it is outside */
+    derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_GEAR_ESTIMATE, false, 0.0f, 12100u);
+    derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_GEARBOX_RATIO_MEASURED, true, r, 12100u);
+    derived_windows_run(&W);
+    derived_windows_end(&W);
+    expect(CRUISE_COUNT, 1.0, 0.0);
+    expect_flag(FD_RESIDUAL, DERIVED_FLAG_NO_DATA);
+}
+
+/* the mean of the valid VE rows inside the instance minus the 85 % reference (D-106): (80 + 90 + 100) / 3 = 90 -> 5 */
+static void test_the_ve_residual_is_the_mean_minus_the_reference(void)
+{
+    const float v1 = 80.0f;
+    const float v2 = 90.0f;
+    const float v3 = 100.0f;
+    for (uint32_t t = 0u; t <= 12000u; t += 100u) {
+        const float* ve = (t == 500u) ? &v1 : ((t == 6000u) ? &v2 : ((t == 11000u) ? &v3 : NULL));
+        cruise_row(t, 5u, NULL, ve);
+    }
+    derived_windows_push_derived(&W, VEHICLE_CL250_DERIVED_VOLUMETRIC_EFFICIENCY, false, 0.0f, 11500u); /* invalid: no sample */
+    derived_windows_run(&W);
+    derived_windows_end(&W);
+    expect(VE_RESIDUAL, 90.0 - (double)VEHICLE_CL250_INTAKE_FLOW_RESIDUAL_VE_REFERENCE_PCT, 1.0e-6);
+    expect_flag(FD_RESIDUAL, DERIVED_FLAG_NO_DATA);
+}
+
+static void test_the_w4_row_buffer_overflow_is_a_math_error(void)
+{
+    /* more ratio rows than the longest instance can hold, one per ms: never a wrong median */
+    const float r = 1.35f;
+    for (uint32_t t = 0u; t < 11000u; t += 100u) {
+        cruise_row(t, 4u, NULL, NULL);
+    }
+    for (uint32_t i = 0u; i < (DERIVED_WIN_CRUISE_RATIO_CAP + 3u); i++) {
+        cruise_row(11000u + i, 4u, &r, NULL);
+    }
+    derived_windows_end(&W);
+    expect_flag(FD_RESIDUAL, DERIVED_FLAG_MATH_ERROR);
+    expect_flag(CRUISE_COUNT, DERIVED_FLAG_MATH_ERROR);
+}
+
 /* ---- W5: post stop (engine stop) ----------------------------------------------------------------- */
 
 /* The engine stops at 220 (800 rpm samples before, then 0 every 110 ms). Coolant minus ambient
@@ -563,7 +660,9 @@ static void test_gen_checks(void)
     TEST_ASSERT_EQUAL_UINT32(DERIVED_WINDOWS_NONE, derived_windows_of_signal(VEHICLE_CL250_DERIVED_RIDE_DISTANCE));
     TEST_ASSERT_EQUAL_UINT32(DERIVED_WINDOWS_NONE, derived_windows_of_signal(VEHICLE_CL250_DERIVED_COUNT));
     TEST_ASSERT_TRUE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_COUNT));
-    TEST_ASSERT_FALSE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL));
+    TEST_ASSERT_TRUE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_VE_RESIDUAL));
+    TEST_ASSERT_TRUE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_FINAL_DRIVE_RESIDUAL));
+    TEST_ASSERT_FALSE(derived_windows_has_summary(VEHICLE_CL250_DERIVED_WINDOW_CRUISE_ENGINE_VIBRATION));
     for (uint32_t w = 0u; w < DERIVED_WINDOWS_COUNT; w++) {
         TEST_ASSERT_TRUE(derived_windows_sizing_ok(w, DERIVED_WIN_RPM_HIST_CAP));
     }
@@ -639,6 +738,10 @@ int main(void)
     RUN_TEST(test_cruise_closes_when_a_stable_band_is_exceeded);
     RUN_TEST(test_cruise_that_ends_too_early_does_not_qualify);
     RUN_TEST(test_an_unknown_gear_closes_the_cruise_by_condition);
+    RUN_TEST(test_the_final_drive_residual_is_the_median_of_the_per_gear_estimates);
+    RUN_TEST(test_a_ratio_without_a_valid_gear_is_no_sample);
+    RUN_TEST(test_the_ve_residual_is_the_mean_minus_the_reference);
+    RUN_TEST(test_the_w4_row_buffer_overflow_is_a_math_error);
     RUN_TEST(test_post_stop_statistics_and_tau);
     RUN_TEST(test_tau_failure_flags);
     RUN_TEST(test_tau_needs_three_positive_differences_and_an_ambient);

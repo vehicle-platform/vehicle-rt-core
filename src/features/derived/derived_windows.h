@@ -62,6 +62,10 @@ extern "C" {
  * derived_windows_sizing_ok() still checks it against the tables at init. */
 #define DERIVED_WIN_POST_STOP_COOLANT_CAP                                                             \
     ((((uint32_t)VEHICLE_CL250_MAX_DURATION_MS_W5_POST_STOP) / ((uint32_t)VEHICLE_CL250_POLL_MS_COOLANT_TEMP)) + 2u)
+/* W4 final-drive estimates (D-106, float32, kept sorted so the median is read-only):
+ * max_duration_ms / gearbox_ratio_measured period + 2 (the boundary sample is inside). */
+#define DERIVED_WIN_CRUISE_RATIO_CAP                                                                  \
+    ((((uint32_t)VEHICLE_CL250_MAX_DURATION_MS_W4_CRUISE) / ((uint32_t)VEHICLE_CL250_PERIOD_MS_GEARBOX_RATIO_MEASURED)) + 2u)
 #define DERIVED_WINDOWS_NONE (0xFFu)
 
 /* Latest sample of one window input and its pending expiry. */
@@ -89,7 +93,8 @@ typedef struct {
 typedef struct {
     uint32_t t;
     float v;
-    uint8_t did;
+    uint8_t kind;  /* VEHICLE_CL250_DERIVED_INPUT_DID / _DERIVED */
+    uint8_t index; /* the DID or derived signal; v of the final-drive row is already the estimate */
 } derived_win_item_t;
 
 /* Mean over DID samples (the reference's sum / len, double). */
@@ -104,7 +109,8 @@ typedef struct {
 #define DERIVED_WIN_MEAN_AMBIENT (3u)
 #define DERIVED_WIN_MEAN_MAP (4u)
 #define DERIVED_WIN_MEAN_BARO (5u)
-#define DERIVED_WIN_MEANS (6u)
+#define DERIVED_WIN_MEAN_VE (6u) /* W4 volumetric_efficiency rows (D-106) */
+#define DERIVED_WIN_MEANS (7u)
 
 /* Statistics of the instance being collected (the first qualifying one once frozen). */
 typedef struct {
@@ -119,6 +125,7 @@ typedef struct {
     uint32_t coolant_n; /* samples in the shared buffer */
     uint32_t coolant_t0; /* stamp of the first stored sample */
     uint32_t coolant_tl; /* stamp of the last stored sample */
+    uint32_t ratio_n;    /* W4 final-drive estimates in the shared sorted buffer (D-106) */
     /* warm-idle engine speed, computed from the core's RPM history when the instance closes */
     double rpm_spread;
     double rpm_drift;
@@ -173,6 +180,7 @@ typedef struct {
 typedef struct {
     derived_win_t w[DERIVED_WINDOWS_COUNT];
     derived_win_cool_t coolant_buf[DERIVED_WIN_POST_STOP_COOLANT_CAP]; /* W5 tau fit */
+    float ratio_buf[DERIVED_WIN_CRUISE_RATIO_CAP];                      /* W4 final-drive median, ascending */
     derived_win_event_t ev[DERIVED_WINDOWS_EVENT_CAP];
     const derived_sample_t* rpm_data; /* the core's ENGINE_SPEED history (warm-idle drift) */
     const derived_ring_t* rpm_ring;

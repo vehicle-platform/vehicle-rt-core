@@ -59,6 +59,7 @@ _Static_assert((int)DERIVED_FLAG_NO_GEAR == (int)DERIVED_VECTOR_FLAG_NO_GEAR, "f
 _Static_assert((int)DERIVED_FLAG_NOT_APPLICABLE == (int)DERIVED_VECTOR_FLAG_NOT_APPLICABLE, "flag");
 _Static_assert((int)DERIVED_FLAG_NO_DATA == (int)DERIVED_VECTOR_FLAG_NO_DATA, "flag");
 _Static_assert((int)DERIVED_FLAG_NO_WINDOW == (int)DERIVED_VECTOR_FLAG_NO_WINDOW, "flag");
+_Static_assert((int)DERIVED_FLAG_POLL_TOO_SLOW == (int)DERIVED_VECTOR_FLAG_POLL_TOO_SLOW, "flag");
 
 typedef struct {
     const char* name;
@@ -417,10 +418,13 @@ static void test_not_computed_signals_report_a_distinct_reason(void)
         }
         TEST_ASSERT_EQUAL_INT(DERIVED_FLAG_NONE, o->flag);
     }
-    /* the two ride summaries over every sample of the ride are unbounded; an IMU-input signal is not ready */
+    /* the ride summary over every sample of the ride is unbounded; an IMU-input signal is not ready.
+     * throttle_torque_lag is computed on the CL250: its polls are too slow to resolve it, so it is
+     * always NA with POLL_TOO_SLOW (D-106 item 3; it stays unbounded only for a faster poll table) */
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE));
-    TEST_ASSERT_EQUAL_INT(DERIVED_NC_UNBOUNDED, derived_core_reason(&core, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG));
-    TEST_ASSERT_EQUAL_UINT32(2u, seen[(uint32_t)DERIVED_NC_UNBOUNDED]);
+    TEST_ASSERT_EQUAL_INT(DERIVED_NC_NONE, derived_core_reason(&core, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG));
+    TEST_ASSERT_TRUE(derived_core_is_computed(&core, VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG));
+    TEST_ASSERT_EQUAL_UINT32(1u, seen[(uint32_t)DERIVED_NC_UNBOUNDED]);
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_NOT_READY, derived_core_reason(&core, VEHICLE_CL250_DERIVED_ACCEL_IMU_RESIDUAL));
     TEST_ASSERT_EQUAL_INT(DERIVED_NC_NOT_READY, derived_core_reason(&core, VEHICLE_CL250_DERIVED_ROAD_GRADE));
     TEST_ASSERT_EQUAL_UINT32(0u, seen[(uint32_t)DERIVED_NC_CLASS]); /* the gen table has only A and B */

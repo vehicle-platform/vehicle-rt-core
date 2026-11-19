@@ -1417,6 +1417,18 @@ static bool sizing_ok(uint32_t sig)
     return ok && derived_ride_tail_fits(sig); /* the waiting rows of the ride summaries */
 }
 
+/* D-106 item 3: throttle_torque_lag is resolvable only when both lag DIDs are polled at least
+ * every throttle_torque_lag_search_max_ms / throttle_torque_lag_min_samples (gen/ poll periods). */
+static bool lag_resolvable(void)
+{
+    const uint32_t min_samples = (uint32_t)VEHICLE_CL250_THROTTLE_TORQUE_LAG_MIN_SAMPLES;
+    const uint32_t thr = vehicle_cl250_dids[VEHICLE_CL250_IDX_THROTTLE_POS].poll_period_ms;
+    const uint32_t trq = vehicle_cl250_dids[VEHICLE_CL250_IDX_ACTUAL_TORQUE_PCT].poll_period_ms;
+    const uint32_t slowest = (thr > trq) ? thr : trq;
+    return (min_samples != 0u) && (slowest != 0u) &&
+           (slowest <= ((uint32_t)VEHICLE_CL250_THROTTLE_TORQUE_LAG_SEARCH_MAX_MS / min_samples));
+}
+
 static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
 {
     const vehicle_cl250_derived_t* const s = &vehicle_cl250_derived[sig];
@@ -1428,8 +1440,11 @@ static derived_nc_reason_t classify(const derived_core_t* c, uint32_t sig)
         r = DERIVED_NC_NOT_READY;
     } else if (ride && ((s->elements != 1u) || (s->axis_count != 0u) || s->per_gear)) {
         r = DERIVED_NC_ELEMENTS; /* binned or per-gear: more than a scalar state */
-    } else if ((sig == VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE) || (sig == VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG)) {
-        r = DERIVED_NC_UNBOUNDED; /* a p95 / a median over every sample or step of the ride */
+    } else if ((sig == VEHICLE_CL250_DERIVED_RIDE_AGGRESSIVENESS_SCORE) ||
+               ((sig == VEHICLE_CL250_DERIVED_THROTTLE_TORQUE_LAG) && lag_resolvable())) {
+        /* a p95 / a median over every sample or step of the ride; a lag whose polls are too slow
+         * (the CL250) is computed instead: always NA, DERIVED_FLAG_POLL_TOO_SLOW (D-106) */
+        r = DERIVED_NC_UNBOUNDED;
     } else if (kind_of(sig) == KIND_NONE) {
         r = DERIVED_NC_NO_FORMULA;
     } else if ((s->input_count == 0u) || (s->input_count > VEHICLE_CL250_DERIVED_INPUT_MAX) ||
