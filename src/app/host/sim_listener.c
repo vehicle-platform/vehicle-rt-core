@@ -17,13 +17,13 @@ static void hb_set(struct platform_heartbeat_rt_core_t* m, hb_field_t f, uint32_
         m->e2_e_counter = (uint8_t)v;
         break;
     case HB_NODE_MODE:
-        m->node_mode = (uint8_t)v;
+        m->rt_core_node_mode = (uint8_t)v;
         break;
     case HB_ERROR_COUNT:
-        m->error_count = (uint8_t)v;
+        m->rt_core_error_count = (uint8_t)v;
         break;
     default:
-        m->uptime = (uint16_t)v;
+        m->rt_core_uptime = (uint16_t)v;
         break;
     }
 }
@@ -54,9 +54,9 @@ void sim_listener_heartbeat_decode(const uint8_t* data, struct platform_heartbea
     memset(msg, 0, sizeof *msg);
     msg->e2_e_crc = (uint8_t)hb_field(data, HB_E2E_CRC, 8u * sizeof msg->e2_e_crc);
     msg->e2_e_counter = (uint8_t)hb_field(data, HB_E2E_COUNTER, 8u * sizeof msg->e2_e_counter);
-    msg->node_mode = (uint8_t)hb_field(data, HB_NODE_MODE, 8u * sizeof msg->node_mode);
-    msg->error_count = (uint8_t)hb_field(data, HB_ERROR_COUNT, 8u * sizeof msg->error_count);
-    msg->uptime = (uint16_t)hb_field(data, HB_UPTIME, 8u * sizeof msg->uptime);
+    msg->rt_core_node_mode = (uint8_t)hb_field(data, HB_NODE_MODE, 8u * sizeof msg->rt_core_node_mode);
+    msg->rt_core_error_count = (uint8_t)hb_field(data, HB_ERROR_COUNT, 8u * sizeof msg->rt_core_error_count);
+    msg->rt_core_uptime = (uint16_t)hb_field(data, HB_UPTIME, 8u * sizeof msg->rt_core_uptime);
 }
 
 bool sim_listener_init(sim_listener_t* l, vbus_t* bus)
@@ -99,19 +99,19 @@ static void check_heartbeat(sim_listener_t* l, const can_frame_t* f, uint32_t no
     }
     struct platform_heartbeat_rt_core_t msg;
     sim_listener_heartbeat_decode(f->data, &msg);
-    if (msg.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) {
+    if (msg.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) {
         l->heartbeat_normal++;
-    } else if (msg.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
+    } else if (msg.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) {
         l->heartbeat_degraded++;
-    } else if (!first || (msg.node_mode != PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE)) {
+    } else if (!first || (msg.rt_core_node_mode != PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE)) {
         l->heartbeat_bad_mode++;
     } else {
         /* INIT on the first frame */
     }
-    if (!first && (msg.uptime < l->heartbeat_uptime)) {
+    if (!first && (msg.rt_core_uptime < l->heartbeat_uptime)) {
         l->heartbeat_uptime_back++;
     }
-    l->heartbeat_uptime = msg.uptime;
+    l->heartbeat_uptime = msg.rt_core_uptime;
 }
 
 void sim_listener_step(sim_listener_t* l, uint32_t now_ms)

@@ -5,7 +5,7 @@
  * CAN port interface (HAL-free). One implementation per platform:
  *  - hal/host/can_port_host.c : in-process virtual bus, or Linux SocketCAN (vcan/can)
  *  - hal/stm32/ (later)       : FDCAN1 (vehicle bus) / FDCAN2 (platform bus), once the
- *                               board (H743/H723, Q-019) and its CubeMX project exist
+ *                               board (NUCLEO-H743ZI2, D-118) and its CubeMX project exist
  * Only services/ (and the platform setup in app/) include this header. Features talk to
  * CAN through services/can_if, which also enforces the vehicle-bus guard (D-020); CI
  * fails if a file under src/features/ includes hal/.

@@ -143,7 +143,7 @@ uint32_t can_if_dispatch(can_port_id_t port, uint32_t max_frames)
 
 /* ISSUES E-14 (5): every frame rt-core sends with a standard ID in an E2E-mandatory
  * platform range (gen/ platform_e2e_id_mandatory(): safety 0x010-0x07F, heartbeat
- * 0x080-0x08F) comes from its gen/ E2E sender (or the mailbox forward of an M4 frame) on a
+ * 0x080-0x08F) comes from its gen/ E2E sender on a
  * registered dedicated TX buffer (D-056); anything else there would be an unprotected frame
  * in the safety range, or an E2E frame in the Tx FIFO. */
 static bool tx_dedicated_registered(uint32_t id, bool extended)

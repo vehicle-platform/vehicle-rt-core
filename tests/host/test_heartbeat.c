@@ -27,6 +27,8 @@ static uint8_t node_dut;
 static uint8_t node_peer;
 static uint8_t node_vehicle;
 static heartbeat_t hb;
+/* D-118: the schedule runs half a 0x020 cycle behind the first (INIT) frame. */
+#define HB_PHASE_MS (PLATFORM_EKF_LEAN_CYCLE_TIME_MS / 2u)
 static vehicle_e2e_rx_state_t rx;
 static bool client_running; /* the test writes a healthy tester status every pass */
 static bool client_latched;
@@ -100,9 +102,9 @@ static void drain(seen_t* s)
         s->e2e_initial += (st == VEHICLE_E2E_INITIAL) ? 1u : 0u;
         s->e2e_other += ((st != VEHICLE_E2E_OK) && (st != VEHICLE_E2E_INITIAL)) ? 1u : 0u;
         sim_listener_heartbeat_decode(f.data, &s->last); /* gen/ pack as the layout oracle */
-        s->init += (s->last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE) ? 1u : 0u;
-        s->normal += (s->last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
-        s->degraded += (s->last.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
+        s->init += (s->last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE) ? 1u : 0u;
+        s->normal += (s->last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
+        s->degraded += (s->last.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
     }
 }
 
@@ -153,7 +155,7 @@ static void test_0x081_goes_out_every_cycle_from_the_first_pass_init_then_normal
     TEST_ASSERT_EQUAL_UINT32(s.frames - 1u, s.normal);
     TEST_ASSERT_EQUAL_UINT32(s.frames - 1u, s.e2e_ok);
     TEST_ASSERT_EQUAL_UINT32(0u, s.e2e_other);
-    TEST_ASSERT_EQUAL_UINT8(0u, s.last.error_count);
+    TEST_ASSERT_EQUAL_UINT8(0u, s.last.rt_core_error_count);
     TEST_ASSERT_EQUAL_UINT32(s.frames, hb.stats.sent);
     TEST_ASSERT_EQUAL_UINT32(0u, hb.stats.retried + hb.stats.dropped);
     TEST_ASSERT_EQUAL_UINT32(0u, vbus_frame_count(&bus_v)); /* nothing on the vehicle bus */
@@ -164,9 +166,9 @@ static void test_uptime_counts_whole_seconds_since_boot(void)
     seen_t s;
     memset(&s, 0, sizeof s);
     run(&s, 1u);
-    TEST_ASSERT_EQUAL_UINT16(START_MS / 1000u, s.last.uptime); /* the timebase counts from reset */
-    run(&s, 2000u);
-    TEST_ASSERT_EQUAL_UINT16((START_MS + 2000u) / 1000u, s.last.uptime); /* last frame at +2000 ms */
+    TEST_ASSERT_EQUAL_UINT16(START_MS / 1000u, s.last.rt_core_uptime); /* the timebase counts from reset */
+    run(&s, 2000u + HB_PHASE_MS);
+    TEST_ASSERT_EQUAL_UINT16((START_MS + 2000u) / 1000u, s.last.rt_core_uptime); /* last frame at +2000 + phase */
 }
 
 /* ------------------------------------------------------------------ faults */
@@ -175,23 +177,23 @@ static void test_a_failed_monitor_degrades_until_it_passes_and_each_onset_counts
 {
     seen_t s;
     memset(&s, 0, sizeof s);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u); /* INIT, then the first NORMAL */
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u); /* INIT, then the first NORMAL */
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
     for (uint32_t i = 0u; i < 3u * PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS; i++) {
         diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_ECU_COMM_LOST, true); /* every pass */
         run(&s, 1u);
     }
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(1u, s.last.error_count);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(1u, s.last.rt_core_error_count);
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_ECU_COMM_LOST, false);
     run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(1u, s.last.error_count); /* faults since boot: kept */
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(1u, s.last.rt_core_error_count); /* faults since boot: kept */
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_ECU_COMM_LOST, true);
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_TESTER_LATCHED, true);
     run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(3u, s.last.error_count);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(3u, s.last.rt_core_error_count);
     TEST_ASSERT_EQUAL_UINT32(0u, s.e2e_other);
 }
 
@@ -200,16 +202,16 @@ static void test_a_dtc_clear_hides_no_fault_and_keeps_the_error_count(void)
     seen_t s;
     memset(&s, 0, sizeof s);
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED, true);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
     diag_dtc_clear_all(); /* UDS 0x14 from a platform tester */
     TEST_ASSERT_EQUAL_UINT8(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED));
     run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(1u, s.last.error_count);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(1u, s.last.rt_core_error_count);
     diag_dtc_report(PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED, true); /* the monitor again */
     run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
-    TEST_ASSERT_EQUAL_UINT8(1u, s.last.error_count); /* not a new onset */
+    TEST_ASSERT_EQUAL_UINT8(1u, s.last.rt_core_error_count); /* not a new onset */
 }
 
 static void test_a_stopped_client_degrades_although_no_monitor_reports_it(void)
@@ -220,10 +222,10 @@ static void test_a_stopped_client_degrades_although_no_monitor_reports_it(void)
     client_running = false; /* no status; the server's diag_supervise() never runs either */
     run(&s, PLATFORM_UDS_VEHICLE_TESTER_STATUS_MAX_AGE_MS + PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
     TEST_ASSERT_FALSE(diag_fault_active()); /* no DTC monitor saw it */
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
     client_running = true;
     run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
 }
 
 static void test_a_latched_client_degrades_although_no_monitor_reports_it(void)
@@ -233,22 +235,22 @@ static void test_a_latched_client_degrades_although_no_monitor_reports_it(void)
     client_latched = true;
     run(&s, 2u * PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
     TEST_ASSERT_EQUAL_UINT32(0u, s.normal);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
 }
 
 static void test_a_latched_vehicle_port_degrades_without_the_server_monitor(void)
 {
     seen_t s;
     memset(&s, 0, sizeof s);
-    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + 1u); /* INIT, then the first NORMAL */
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
+    run(&s, PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS + 1u); /* INIT, then the first NORMAL */
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
     latch_vehicle_port();
     memset(&s, 0, sizeof s);
     vehicle_e2e_rx_init(&rx);
     run(&s, 2u * PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS);
     TEST_ASSERT_FALSE(diag_fault_active()); /* U0001-88 is reported by the server only */
     TEST_ASSERT_EQUAL_UINT32(0u, s.normal);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, s.last.rt_core_node_mode);
 }
 
 static void test_an_unknown_vehicle_port_state_is_not_read_as_a_latch(void)
@@ -259,7 +261,7 @@ static void test_an_unknown_vehicle_port_state_is_not_read_as_a_latch(void)
     TEST_ASSERT_FALSE(can_sm_state_known(CAN_PORT_VEHICLE));
     seen_t s;
     memset(&s, 0, sizeof s);
-    for (uint32_t i = 0u; i <= PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS; i++) {
+    for (uint32_t i = 0u; i <= PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS + HB_PHASE_MS; i++) {
         const diag_vehicle_tester_t st = {true, true, false,
                                           (uint8_t)PLATFORM_UDS_VEHICLE_TESTER_STATUS_FAULT_NONE};
         diag_set_vehicle_tester(&st, timebase_now_ms());
@@ -271,7 +273,7 @@ static void test_an_unknown_vehicle_port_state_is_not_read_as_a_latch(void)
     TEST_ASSERT_FALSE(can_sm_state_known(CAN_PORT_VEHICLE));
     TEST_ASSERT_EQUAL_UINT32(2u, s.frames);
     /* no latch is invented (the UDS client reports an unreadable port its own way) */
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.node_mode);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, s.last.rt_core_node_mode);
 }
 
 /* ------------------------------------------------------------------ transport */

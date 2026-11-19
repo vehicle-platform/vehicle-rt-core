@@ -8,11 +8,11 @@
 
 uint8_t heartbeat_node_mode(bool first_frame, bool fault_active)
 {
-    uint8_t mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE;
+    uint8_t mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE;
     if (first_frame) {
-        mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE;
+        mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE;
     } else if (fault_active) {
-        mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE;
+        mode = (uint8_t)PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE;
     } else {
         /* NORMAL: no DTC monitor reports a fault (D-064 item 1) */
     }
@@ -45,13 +45,13 @@ void heartbeat_msg(bool first_frame, bool fault_active, uint32_t fault_onsets,
                    const heartbeat_uptime_t* up, struct platform_heartbeat_rt_core_t* msg)
 {
     (void)platform_heartbeat_rt_core_init(msg);
-    msg->node_mode = heartbeat_node_mode(first_frame, fault_active);
+    msg->rt_core_node_mode = heartbeat_node_mode(first_frame, fault_active);
     /* uint32 -> float is exact up to 2^24; above that the encode saturates anyway */
     const float onsets = (float)fault_onsets;
-    msg->error_count = platform_heartbeat_rt_core_error_count_encode(onsets);
+    msg->rt_core_error_count = platform_heartbeat_rt_core_rt_core_error_count_encode(onsets);
     const uint32_t whole_s = up->elapsed_ms / MS_PER_S; /* at most 4294967: exact in float */
     const float seconds = (float)whole_s;
-    msg->uptime = platform_heartbeat_rt_core_uptime_encode(seconds);
+    msg->rt_core_uptime = platform_heartbeat_rt_core_rt_core_uptime_encode(seconds);
 }
 
 bool heartbeat_frame(const struct platform_heartbeat_rt_core_t* msg,

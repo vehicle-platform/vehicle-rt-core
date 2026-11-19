@@ -1,7 +1,6 @@
 #include "services/com.h"
 
 #include "services/can_if.h"
-#include "services/mailbox.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -30,9 +29,6 @@ bool com_send(uint32_t id, bool extended, const uint8_t* data, uint8_t dlc,
     bool finished = true;
     if (st == CAN_PORT_OK) {
         stat_inc(&stats->sent);
-        /* D-093: the M4's copy of an M7->M4 slot message is exactly the frame whose E2E
-         * counter the sender commits now (D-056 item 5); any other ID is ignored. */
-        (void)mailbox_offer(id, extended, data, dlc);
     } else if (st == CAN_PORT_TX_FULL) {
         stat_inc(&stats->retried); /* replace cancel pending or Tx FIFO full */
         finished = false;

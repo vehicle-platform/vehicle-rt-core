@@ -24,10 +24,10 @@ static struct platform_heartbeat_rt_core_t unpack(const uint8_t data[PLATFORM_HE
 
 static void test_node_mode_is_init_first_then_degraded_on_a_fault_else_normal(void)
 {
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE, heartbeat_node_mode(true, false));
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_INIT_CHOICE, heartbeat_node_mode(true, true));
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, heartbeat_node_mode(false, true));
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, heartbeat_node_mode(false, false));
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE, heartbeat_node_mode(true, false));
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_INIT_CHOICE, heartbeat_node_mode(true, true));
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, heartbeat_node_mode(false, true));
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, heartbeat_node_mode(false, false));
 }
 
 static void test_any_single_fault_condition_degrades(void)
@@ -86,9 +86,9 @@ static void test_the_message_carries_mode_error_count_and_whole_seconds(void)
     heartbeat_uptime_t up = {12999u, 0u};
     struct platform_heartbeat_rt_core_t msg;
     heartbeat_msg(false, true, 3u, &up, &msg);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE, msg.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(3u, msg.error_count);
-    TEST_ASSERT_EQUAL_UINT16(12u, msg.uptime); /* whole seconds, never rounded up */
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE, msg.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(3u, msg.rt_core_error_count);
+    TEST_ASSERT_EQUAL_UINT16(12u, msg.rt_core_uptime); /* whole seconds, never rounded up */
     TEST_ASSERT_EQUAL_UINT8(0u, msg.e2_e_crc); /* E2E is added by heartbeat_frame() */
     TEST_ASSERT_EQUAL_UINT8(0u, msg.e2_e_counter);
 }
@@ -100,22 +100,22 @@ static void test_error_count_and_uptime_saturate_at_their_signal_maximum(void)
     heartbeat_uptime_t up = {UINT32_MAX, 0u};
     heartbeat_msg(false, false, UINT32_MAX, &up, &msg);
     /* the maxima of the signals: the largest raw values the gen/ range check accepts */
-    TEST_ASSERT_TRUE(platform_heartbeat_rt_core_error_count_is_in_range(msg.error_count));
-    TEST_ASSERT_TRUE(platform_heartbeat_rt_core_uptime_is_in_range(msg.uptime));
+    TEST_ASSERT_TRUE(platform_heartbeat_rt_core_rt_core_error_count_is_in_range(msg.rt_core_error_count));
+    TEST_ASSERT_TRUE(platform_heartbeat_rt_core_rt_core_uptime_is_in_range(msg.rt_core_uptime));
     memset(&max, 0xFF, sizeof max);
-    TEST_ASSERT_EQUAL_UINT8(max.error_count, msg.error_count);
-    TEST_ASSERT_EQUAL_UINT16(max.uptime, msg.uptime);
+    TEST_ASSERT_EQUAL_UINT8(max.rt_core_error_count, msg.rt_core_error_count);
+    TEST_ASSERT_EQUAL_UINT16(max.rt_core_uptime, msg.rt_core_uptime);
     /* one below and at the limit */
-    heartbeat_msg(false, false, (uint32_t)max.error_count - 1u, &up, &msg);
-    TEST_ASSERT_EQUAL_UINT8((uint8_t)(max.error_count - 1u), msg.error_count);
-    heartbeat_msg(false, false, (uint32_t)max.error_count + 1u, &up, &msg);
-    TEST_ASSERT_EQUAL_UINT8(max.error_count, msg.error_count);
-    up.elapsed_ms = ((uint32_t)max.uptime + 1u) * 1000u; /* 65536 s */
+    heartbeat_msg(false, false, (uint32_t)max.rt_core_error_count - 1u, &up, &msg);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)(max.rt_core_error_count - 1u), msg.rt_core_error_count);
+    heartbeat_msg(false, false, (uint32_t)max.rt_core_error_count + 1u, &up, &msg);
+    TEST_ASSERT_EQUAL_UINT8(max.rt_core_error_count, msg.rt_core_error_count);
+    up.elapsed_ms = ((uint32_t)max.rt_core_uptime + 1u) * 1000u; /* 65536 s */
     heartbeat_msg(false, false, 0u, &up, &msg);
-    TEST_ASSERT_EQUAL_UINT16(max.uptime, msg.uptime);
-    up.elapsed_ms = (uint32_t)max.uptime * 1000u - 1u; /* 65534.999 s */
+    TEST_ASSERT_EQUAL_UINT16(max.rt_core_uptime, msg.rt_core_uptime);
+    up.elapsed_ms = (uint32_t)max.rt_core_uptime * 1000u - 1u; /* 65534.999 s */
     heartbeat_msg(false, false, 0u, &up, &msg);
-    TEST_ASSERT_EQUAL_UINT16((uint16_t)(max.uptime - 1u), msg.uptime);
+    TEST_ASSERT_EQUAL_UINT16((uint16_t)(max.rt_core_uptime - 1u), msg.rt_core_uptime);
 }
 
 static void test_frames_pass_the_receiver_e2e_check_and_the_counter_moves_only_when_committed(void)
@@ -145,9 +145,9 @@ static void test_frames_pass_the_receiver_e2e_check_and_the_counter_moves_only_w
                                      PLATFORM_HEARTBEAT_RT_CORE_E2E_TIMEOUT_MS, b, sizeof b, &rx,
                                      PLATFORM_HEARTBEAT_RT_CORE_CYCLE_TIME_MS));
     const struct platform_heartbeat_rt_core_t got = unpack(b);
-    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE, got.node_mode);
-    TEST_ASSERT_EQUAL_UINT8(7u, got.error_count);
-    TEST_ASSERT_EQUAL_UINT16(42u, got.uptime);
+    TEST_ASSERT_EQUAL_UINT8(PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE, got.rt_core_node_mode);
+    TEST_ASSERT_EQUAL_UINT8(7u, got.rt_core_error_count);
+    TEST_ASSERT_EQUAL_UINT16(42u, got.rt_core_uptime);
     /* another DataID (a masquerading sender) fails the CRC */
     TEST_ASSERT_TRUE(heartbeat_frame(&msg, &next, &committed, b));
     TEST_ASSERT_EQUAL(VEHICLE_E2E_WRONG_CRC,
