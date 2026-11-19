@@ -21,6 +21,16 @@
  * open flag and counter, the ride boundary of the class-B summaries) and a pass counter (one
  * per publish, so a test can tell a torn record: every entry of one record comes from the
  * same pass).
+ *
+ * D-104 (data_quality_mask): the record also carries the tester's per-DID quality state, the
+ * vehicle-bus bus-off count and the tester's step-gap window (services/tester_quality), valid
+ * flag included, all stamped with published_ms. The window is TAKEN AND CLEARED from the
+ * service by every publish (the reset belongs to this sampler, not to the UDS glue). The
+ * derived task reads only the newest record and the comms pass publishes far more often than
+ * it reads, so a gap seen in one publish would be overwritten before any 110 ms tick of the
+ * derived task could read it: the publish therefore holds the largest taken gap in the record
+ * for DERIVED_INPUTS_GAP_HOLD_MS (twice the signal's period, so a tick always sees it) and
+ * then lets it go; a larger gap taken meanwhile replaces it.
  * Entries keep the sample's own stamp, so a stalled producer makes them age out in the
  * consumer: the record says "newest", not "fresh".
  *
@@ -29,6 +39,7 @@
  */
 
 #include "vehicle_cl250.h"
+#include "vehicle_cl250_derived.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -36,6 +47,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* How long a taken step gap stays in the published records (D-104): two periods of the
+ * data_quality_mask grid, so at least one tick of the derived task reads it. */
+#define DERIVED_INPUTS_GAP_HOLD_MS (2u * VEHICLE_CL250_PERIOD_MS_DATA_QUALITY_MASK)
 
 typedef struct {
     float value;
@@ -46,8 +61,12 @@ typedef struct {
 typedef struct {
     uint32_t pass;         /* 0 = the boot record, no publish yet */
     uint32_t published_ms; /* the comms task's time of the copy */
+    uint32_t bus_off_count;     /* services/tester_quality: vehicle-bus bus-offs since boot (D-104) */
+    uint32_t step_gap_window_ms; /* longest tester poll gap in the hold window (D-104, see below) */
     uint16_t epoch_counter; /* services/tester_epoch at the copy: changes at every new epoch (D-087) */
     uint8_t epoch_open;     /* 1 while a stop epoch is running (the ride is open) */
+    uint8_t quality_valid;  /* 1 when services/tester_quality was valid at the copy; 0 = unknown */
+    uint8_t did_quality[VEHICLE_CL250_DID_COUNT]; /* tester_quality_state_t per DID (D-104) */
     derived_input_entry_t did[VEHICLE_CL250_DID_COUNT];
 } derived_inputs_record_t;
 

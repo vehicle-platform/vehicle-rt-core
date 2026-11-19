@@ -41,6 +41,8 @@ target_include_directories(test_derived_vectors PRIVATE ${CMAKE_CURRENT_SOURCE_D
 # The derived core (D-070) against the golden vectors and hand-computed values.
 vehicle_host_test(test_derived_core)
 target_include_directories(test_derived_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
+vehicle_host_test(test_derived_quality)
+target_include_directories(test_derived_quality PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
 vehicle_host_test(test_derived_d103)
 target_include_directories(test_derived_d103 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${VEHICLE_DEFS_GEN})
 vehicle_host_test(test_derived_ride)
@@ -94,6 +96,7 @@ add_executable(test_derived_inputs_fault test_derived_inputs_fault.c
     ${PROJECT_SOURCE_DIR}/src/services/derived_inputs.c
     ${PROJECT_SOURCE_DIR}/src/services/snapshot.c
     ${PROJECT_SOURCE_DIR}/src/services/tester_epoch.c
+    ${PROJECT_SOURCE_DIR}/src/services/tester_quality.c
     ${PROJECT_SOURCE_DIR}/src/services/vehicle_signals.c)
 target_include_directories(test_derived_inputs_fault PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(test_derived_inputs_fault PRIVATE unity vehicle_defs_gen)

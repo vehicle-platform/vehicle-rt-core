@@ -97,6 +97,18 @@ typedef struct {
     uint16_t counter;
 } derived_epoch_t;
 
+/*
+ * The tester's data-quality inputs of data_quality_mask (D-104), the one signal whose sensor
+ * inputs are not DIDs: the glue copies them from the derived_inputs record (comms task side:
+ * services/tester_quality). The state of a DID, in the order of the service's enum.
+ */
+typedef enum {
+    DERIVED_QUALITY_OK = 0,
+    DERIVED_QUALITY_NRC,     /* the DID's last read got a negative response */
+    DERIVED_QUALITY_STOPPED, /* D-068: stopped by the tester, never counts */
+    DERIVED_QUALITY_SKIPPED  /* skip cooldown, never counts */
+} derived_quality_state_t;
+
 /* Which ride record derived_core_ride_out() / derived_ride_get() reads. */
 typedef enum {
     DERIVED_RIDE_CURRENT = 0, /* the open ride, as it would close now */
