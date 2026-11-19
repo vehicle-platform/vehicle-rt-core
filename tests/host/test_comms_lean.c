@@ -197,8 +197,8 @@ static seen_t run(uint32_t ms, uint32_t speed_kmh, uint32_t divider)
                 struct platform_heartbeat_rt_core_t hb;
                 sim_listener_heartbeat_decode(got.data, &hb);
                 s.hb_frames++;
-                s.hb_normal += (hb.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
-                s.hb_degraded += (hb.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
+                s.hb_normal += (hb.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
+                s.hb_degraded += (hb.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
             } else if (got.id == PLATFORM_EKF_LEAN_FRAME_ID) {
                 const vehicle_e2e_status_t st = vehicle_e2e_check(
                     PLATFORM_EKF_LEAN_E2E_DATA_ID, PLATFORM_EKF_LEAN_E2E_MAX_DELTA_COUNTER,
@@ -602,8 +602,8 @@ static void test_REQ_FD03_a_registered_ekf_with_a_null_lean_sender_reads_degrade
                 frames++;
                 struct platform_heartbeat_rt_core_t hb;
                 sim_listener_heartbeat_decode(got.data, &hb);
-                normal += (hb.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
-                degraded += (hb.node_mode == PLATFORM_HEARTBEAT_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
+                normal += (hb.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_NORMAL_CHOICE) ? 1u : 0u;
+                degraded += (hb.rt_core_node_mode == PLATFORM_HEARTBEAT_RT_CORE_RT_CORE_NODE_MODE_DEGRADED_CHOICE) ? 1u : 0u;
             }
         }
         hal_time_host_advance(1u);
