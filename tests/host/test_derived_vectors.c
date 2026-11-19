@@ -49,7 +49,7 @@ static void check_outputs(const derived_vector_output_t* out, uint32_t n,
     TEST_ASSERT_TRUE(n > 0u);
     for (uint32_t i = 0u; i < n; i++) {
         TEST_ASSERT_TRUE(out[i].signal < VEHICLE_CL250_DERIVED_COUNT);
-        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_NO_WINDOW);
+        TEST_ASSERT_TRUE(out[i].flag <= (uint8_t)DERIVED_VECTOR_FLAG_POLL_TOO_SLOW);
         TEST_ASSERT_TRUE(isfinite(out[i].value));
         TEST_ASSERT_TRUE(has_tol(tol, n_tol, out[i].signal));
         if (out[i].valid) {

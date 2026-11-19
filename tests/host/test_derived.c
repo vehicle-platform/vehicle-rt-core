@@ -33,7 +33,7 @@ static void test_nothing_published_means_no_data(void)
     TEST_ASSERT_EQUAL_INT(DERIVED_NO_DATA, o.status);
     TEST_ASSERT_TRUE(derived_get(VEHICLE_CL250_DERIVED_WHEEL_SLIP, &o));
     TEST_ASSERT_EQUAL_INT(DERIVED_NOT_COMPUTED, o.status);
-    TEST_ASSERT_EQUAL_UINT32(49u + 1u + 42u, derived_core()->computed_count); /* class A + data_quality_mask (D-104) + the class-B scalars */
+    TEST_ASSERT_EQUAL_UINT32(49u + 1u + 45u, derived_core()->computed_count); /* class A + data_quality_mask (D-104) + the class-B scalars */
 }
 
 static void test_a_published_sample_reaches_the_outputs(void)
