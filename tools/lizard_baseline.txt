@@ -1,0 +1,36 @@
+# Complexity/size baseline (tools/lizard_gate.py). Existing offenders only; it may
+# shrink, never grow. F <file>::<function> <ccn> <length>   L <file> <lines>
+# Limits: CCN 15, function length 100, file lines 600.
+F src/app/host/main.c::main 52 222
+F src/app/host/main.c::parse_args 18 35
+F src/app/host/sim_ecu.c::answer 16 57
+F src/app/host/sim_ecu.c::answer_dtc 16 52
+F src/app/host/sim_ecu.c::sim_ecu_step 17 53
+F src/app/host/sim_tester.c::sim_tester_step 24 71
+F src/features/cornering/lean_core.c::lean_core_step 21 82
+F src/features/derived/derived_core.c::classify 39 71
+F src/features/derived/derived_core.c::eval_point 26 88
+F src/features/derived/derived_core.c::kind_of 52 67
+F src/features/derived/derived_core.c::ride_confirm_rows 20 50
+F src/features/derived/derived_d103.c::cranking_step 19 53
+F src/features/derived/derived_d103.c::derived_d103_eval_point 16 55
+F src/features/derived/derived_d103.c::derived_d103_record 17 44
+F src/features/derived/derived_ride.c::apply_row 18 60
+F src/features/derived/derived_ride.c::raw_simple 30 90
+F src/features/derived/derived_windows.c::apply_item 28 84
+F src/features/derived/derived_windows.c::derived_windows_has_summary 20 31
+F src/features/derived/derived_windows.c::derived_windows_sizing_ok 37 79
+F src/features/derived/derived_windows.c::value_of 40 96
+F src/features/derived/derived_windows.c::win_eval_point 33 90
+F src/features/uds/uds_client_core.c::on_negative 27 79
+F src/features/uds/uds_client_core.c::uds_client_core_on_indication 22 86
+F src/features/uds/uds_client_core.c::uds_client_core_poll 30 119
+F src/features/uds/uds_server.c::provider_read_did 24 56
+F src/services/can_if.c::can_if_tx_allowed 16 40
+F src/services/can_sm_core.c::can_sm_core_step 22 61
+F src/services/imu_core.c::imu_core_finish 23 75
+L src/features/derived/derived_core.c 1589
+L src/features/derived/derived_d103.c 860
+L src/features/derived/derived_ride.c 723
+L src/features/derived/derived_windows.c 1219
+L src/features/uds/uds_client_core.c 967

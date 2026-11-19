@@ -267,6 +267,21 @@ jobs:
             --suppress=missingIncludeSystem '--suppress=*:*external/*' -i src/hal/host -i src/app/host \
             -I src -I external/vehicle-defs/gen/c/rt_core src
 
+  # FW-2 / T27: complexity and size ratchet (CCN <= 15, function <= 100 lines, file <= 600
+  # lines). Existing offenders sit in tools/lizard_baseline.txt; new code must comply and the
+  # baseline may only shrink. Applies to every file under src/ (checking, not editing).
+  complexity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lizard
+        run: pipx install lizard==1.26.1
+
+      - name: Complexity ratchet (lizard)
+        run: python3 tools/lizard_gate.py
+
   # The lock-free cross-task exchange (D-065 item 2: services/snapshot, services/alive)
   # under ThreadSanitizer, which cannot share a build with ASan. Includes the two-thread
   # stress tests (the snapshot, and the lean link's EKF and comms sides); a data race or a
