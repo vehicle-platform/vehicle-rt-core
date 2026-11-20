@@ -2,8 +2,8 @@
  * D-103 class-A signals of the pure derived core (D-070, D-103): clutch, neutral and engine-braking
  * states, abuse flags, intake and idle residuals, charging and fuel-level windows, and the shift,
  * launch, braking, refuel, battery-rest and cranking event state machines. Split from
- * derived_core.c, which keeps the scheduler, the rings and the output store; the two files talk
- * through derived_core_internal.h only. See features/derived/README.md.
+ * derived_core.c, which keeps the rings and the output store (the scheduler is derived_step.c); the
+ * units talk through derived_core_internal.h only. See features/derived/README.md.
  */
 #include "features/derived/derived_core_internal.h"
 #include "features/derived/derived_gear.h"
