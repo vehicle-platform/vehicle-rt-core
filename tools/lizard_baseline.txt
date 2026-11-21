@@ -18,10 +18,10 @@ F src/features/derived/derived_ride.c::apply_row 18 60
 F src/features/derived/derived_ride.c::raw_simple 30 90
 F src/features/derived/derived_step.c::ride_confirm_rows 20 50
 F src/features/derived/derived_windows.c::apply_item 28 84
-F src/features/derived/derived_windows.c::derived_windows_has_summary 20 31
-F src/features/derived/derived_windows.c::derived_windows_sizing_ok 37 79
-F src/features/derived/derived_windows.c::value_of 40 96
 F src/features/derived/derived_windows.c::win_eval_point 33 90
+F src/features/derived/derived_windows_setup.c::derived_windows_has_summary 20 31
+F src/features/derived/derived_windows_setup.c::derived_windows_sizing_ok 37 79
+F src/features/derived/derived_windows_value.c::value_of 40 96
 F src/features/uds/uds_client_core.c::on_negative 27 79
 F src/features/uds/uds_client_core.c::uds_client_core_on_indication 22 86
 F src/features/uds/uds_client_core.c::uds_client_core_poll 30 119
@@ -31,5 +31,4 @@ F src/services/can_sm_core.c::can_sm_core_step 22 61
 F src/services/imu_core.c::imu_core_finish 23 75
 L src/features/derived/derived_d103.c 860
 L src/features/derived/derived_ride.c 723
-L src/features/derived/derived_windows.c 1219
 L src/features/uds/uds_client_core.c 967

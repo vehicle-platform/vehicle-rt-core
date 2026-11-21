@@ -24,6 +24,8 @@ add_library(vehicle_rtcore_logic STATIC
     features/derived/derived_gear.c
     features/derived/derived_ride.c
     features/derived/derived_windows.c
+    features/derived/derived_windows_setup.c
+    features/derived/derived_windows_value.c
 )
 target_include_directories(vehicle_rtcore_logic PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

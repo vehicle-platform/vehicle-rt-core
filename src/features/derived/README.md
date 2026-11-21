@@ -13,7 +13,10 @@ Derived signals of D-070 (catalog section 5), computed on rt-core. **Part 1 and 
 | `derived_core_internal.h` | Private interface between the `derived_core*.c` / `derived_formulas.c` / `derived_step.c` / `derived_init.c` units and `derived_d103.c` (`derived_ctx_t`, ring ids, `derived_core_*` / `derived_d103_*`); only `features/derived` may include it (CI layering grep). |
 | `derived_types.h` | Flags, status, input/output rows, the epoch and the ride selector shared by the core and the ride module. |
 | `derived_ride.{h,c}` | Pure class-B accumulators and closed values (part 2a). |
-| `derived_windows.{h,c}` | Pure D-079 window state machine (W1..W5 from gen/ `vehicle_cl250_window[]`) and the statistics of the 17 window summaries. |
+| `derived_windows.{h,c}` | Pure D-079 window state machine (W1..W5 from gen/ `vehicle_cl250_window[]`) and the statistics of the 17 window summaries; the event engine (items, open/close, point step, expiries, run/push/end). |
+| `derived_windows_setup.c` | Window configuration: which windows exist, sizing, channel wiring, condition and stable-band checks (split out of `derived_windows.c`, T27). |
+| `derived_windows_value.c` | The summaries: first qualifying instance and the summary values (split out, T27). |
+| `derived_windows_internal.h` | Private interface of the three `derived_windows*.c` units; only `features/derived` may include it. |
 | `derived_gear.{h,c}` | Gear estimate from the measured ratio, pure and private to this feature for now; it moves to `services/` when a second feature needs a gear (architecture-guard). |
 | `derived.{h,c}` | Glue of the derived task: reads `services/derived_inputs`, maps it to the core's inputs, steps the core, `derived_get(sig, &out)`. |
 | `../../services/derived_inputs.{h,c}` | The comms task to derived task hand-over (below). |
