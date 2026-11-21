@@ -69,9 +69,18 @@ void lean_tx_msg(const lean_record_t* rec, bool comms_fault, uint32_t now_ms,
                              : -PLATFORM_LIMIT_LEAN_ANGLE_CLAMP_MAX_DEG;
         state = (uint8_t)PLATFORM_EKF_LEAN_LEAN_ANGLE_STATE_CLAMPED_CHOICE;
     }
+    /* v0.30.0 (E-7): the checked encoders reject NaN, Inf and a value outside the DBC range
+     * (the plain encode turns NaN into 0, a CRC-valid "ESTIMATED, 0.00 deg"); the guards above
+     * make that unreachable, so a refusal here is the same INVALID frame as any other. */
+    int16_t raw_angle = 0;
+    uint8_t raw_quality = 0u;
+    if ((platform_ekf_lean_lean_angle_encode_checked(roll, &raw_angle) != 0) ||
+        (platform_ekf_lean_lean_angle_quality_encode_checked((float)q, &raw_quality) != 0)) {
+        return;
+    }
     msg->lean_angle_state = state;
-    msg->lean_angle = platform_ekf_lean_lean_angle_encode(roll);
-    msg->lean_angle_quality = platform_ekf_lean_lean_angle_quality_encode((float)q);
+    msg->lean_angle = raw_angle;
+    msg->lean_angle_quality = raw_quality;
 }
 
 bool lean_tx_frame(const struct platform_ekf_lean_t* msg, const vehicle_e2e_tx_state_t* committed,
@@ -80,7 +89,10 @@ bool lean_tx_frame(const struct platform_ekf_lean_t* msg, const vehicle_e2e_tx_s
     if ((msg == NULL) || (committed == NULL) || (next == NULL) || (out == NULL)) {
         return false;
     }
-    if (platform_ekf_lean_pack(out, msg, PLATFORM_EKF_LEAN_LENGTH) != (int)PLATFORM_EKF_LEAN_LENGTH) {
+    /* pack_checked also refuses an undefined LEAN_ANGLE_STATE and any out-of-range signal
+     * (v0.30.0, E-6): nothing is written then and no frame goes out. */
+    if (platform_ekf_lean_pack_checked(out, msg, PLATFORM_EKF_LEAN_LENGTH) !=
+        (int)PLATFORM_EKF_LEAN_LENGTH) {
         return false;
     }
     *next = *committed;

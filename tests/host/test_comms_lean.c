@@ -190,7 +190,7 @@ static seen_t run(uint32_t ms, uint32_t speed_kmh, uint32_t divider)
             lean_ekf_step(&lean, now);
         }
         sim_ecu_step(&ecu, now);
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx, NULL);
         can_frame_t got;
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
             if (got.id == PLATFORM_HEARTBEAT_RT_CORE_FRAME_ID) {
@@ -390,7 +390,7 @@ static void test_a_null_supervision_with_an_open_lean_sends_no_0x020_MINOR_2(voi
             lean_ekf_step(&lean, now);
         }
         sim_ecu_step(&ecu, now);
-        comms_pass(&client, &server, &republisher, &heartbeat, NULL, &tx);
+        comms_pass(&client, &server, &republisher, &heartbeat, NULL, &tx, NULL);
         can_frame_t got;
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
             lean_frames += (got.id == PLATFORM_EKF_LEAN_FRAME_ID) ? 1u : 0u;
@@ -594,7 +594,7 @@ static void test_REQ_FD03_a_registered_ekf_with_a_null_lean_sender_reads_degrade
             lean_ekf_step(&lean, now); /* the EKF runs: only the missing sender is wrong */
         }
         sim_ecu_step(&ecu, now);
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, NULL);
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, NULL, NULL);
         can_frame_t got;
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
             lean_frames += (got.id == PLATFORM_EKF_LEAN_FRAME_ID) ? 1u : 0u;
@@ -701,7 +701,7 @@ static void trace_run(poll_mode_t mode, lean_trace_t* tr, uds_poll_t* up)
             lean_ekf_step(&lean, now);
         }
         sim_ecu_step(&ecu, now);
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx, NULL);
         if (mode == POLL_DIRECT) {
             (void)fd03_flags();
         }

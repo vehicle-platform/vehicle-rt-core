@@ -27,18 +27,26 @@ static uint32_t steps_stamp_ms;
 static bool steps_seen;
 static bool steps_lost; /* sticky like tester_lost, until the next write */
 
-/* The heartbeat class of a DTC (D-064 item 1, D-093 amendment 3 addendum, user
- * 2026-11-05): the SAFETY_MAILBOX_* DTCs describe the safety partition, not rt-core, so
- * they are diagnostic only: they set their status bytes but neither DEGRADED nor
- * ERROR_COUNT (as safety-node never names rt-core for its own faults, D-101 item 1).
- * D-118: the mailbox is retired and nothing reports these two DTCs any more (they stay
- * in gen/ until the defs follow-up replaces them); the classification stays so a stray
- * report still cannot degrade the heartbeat. Every other DTC counts; a new DTC is
- * classified here first. */
+/* The heartbeat class of a DTC (D-064 item 1, D-118 item 6): a DTC the DBC/UDS defs mark
+ * diagnostic_only (generated PLATFORM_UDS_DTC_<NAME>_DIAGNOSTIC_ONLY, v0.30.0) sets its
+ * status bytes but neither DEGRADED nor ERROR_COUNT: today SAFETY_HEARTBEAT_LOST, which
+ * describes the safety MCU, not rt-core, and must never switch safety-node to its
+ * fallback lean (D-042 item 3). Every other DTC counts. One entry per gen/ DTC: a new DTC
+ * is listed here with its generated flag (an unlisted index counts, the safe side for the
+ * heartbeat). */
 static bool counts_for_heartbeat(uint32_t idx)
 {
-    return (idx != (uint32_t)PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH) &&
-           (idx != (uint32_t)PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN);
+    static const bool dtc_diagnostic_only[PLATFORM_UDS_DTC_COUNT] = {
+        [PLATFORM_UDS_DTC_IDX_VEHICLE_ECU_COMM_LOST] =
+            (PLATFORM_UDS_DTC_VEHICLE_ECU_COMM_LOST_DIAGNOSTIC_ONLY != 0u),
+        [PLATFORM_UDS_DTC_IDX_VEHICLE_TESTER_LATCHED] =
+            (PLATFORM_UDS_DTC_VEHICLE_TESTER_LATCHED_DIAGNOSTIC_ONLY != 0u),
+        [PLATFORM_UDS_DTC_IDX_VEHICLE_BUS_OFF_LATCHED] =
+            (PLATFORM_UDS_DTC_VEHICLE_BUS_OFF_LATCHED_DIAGNOSTIC_ONLY != 0u),
+        [PLATFORM_UDS_DTC_IDX_SAFETY_HEARTBEAT_LOST] =
+            (PLATFORM_UDS_DTC_SAFETY_HEARTBEAT_LOST_DIAGNOSTIC_ONLY != 0u),
+    };
+    return (idx < PLATFORM_UDS_DTC_COUNT) && !dtc_diagnostic_only[idx];
 }
 
 static bool tester_fresh(uint32_t now_ms)

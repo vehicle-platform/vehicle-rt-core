@@ -7,6 +7,7 @@ add_library(vehicle_rtcore_logic STATIC
     features/uds/uds_server_core.c
     features/vehicle_republish/vehicle_republish_core.c
     features/heartbeat/heartbeat_core.c
+    features/safety_hb/safety_hb_core.c
     hal/can_frame.c
     services/can_sm_core.c
     services/com_core.c
@@ -77,6 +78,7 @@ add_library(vehicle_rtcore_fw STATIC
     features/uds/uds_server.c
     features/vehicle_republish/vehicle_republish.c
     features/heartbeat/heartbeat.c
+    features/safety_hb/safety_hb.c
     features/cornering/lean.c
     features/cornering/lean_tx.c
     features/derived/derived.c
@@ -104,6 +106,7 @@ if(NOT CMAKE_CROSSCOMPILING)
         app/host/sim_ecu.c
         app/host/sim_tester.c
         app/host/sim_listener.c
+        app/host/sim_safety.c
     )
     target_link_libraries(vehicle_rtcore_sim PUBLIC vehicle_rtcore_hal_host vehicle_defs_gen)
     target_compile_options(vehicle_rtcore_sim PRIVATE ${VEHICLE_WARNINGS})

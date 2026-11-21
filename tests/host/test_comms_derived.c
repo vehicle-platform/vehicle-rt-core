@@ -161,7 +161,7 @@ static counts_t run(uint32_t corrupt_at_ms)
         if ((ride_publish_every_ms != 0u) && ((i % ride_publish_every_ms) == 0u)) {
             (void)ride_records_publish(NULL, false, 0u); /* the derived task closing a ride */
         }
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx, NULL);
         can_frame_t got;
         while (vbus_recv(&bus_p, node_ppeer, &got) == CAN_PORT_OK) {
             if (got.id == PLATFORM_HEARTBEAT_RT_CORE_FRAME_ID) {
