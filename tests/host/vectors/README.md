@@ -22,7 +22,7 @@ cd vehicle-server && uv run vehicle-server golden --out ../vehicle-rt-core/tests
   core, compares every row and fingerprints the gen table the vectors depend on.
 - Provenance: the banner of each file carries the defs version and a content SHA-256; vehicle-server
   keeps the same hashes in `tests/golden/MANIFEST.sha256` and fails its CI when the reference
-  changes without regenerating. Regenerate and commit here whenever that manifest changes.
+  changes without regenerating. Regenerate and commit here whenever that manifest changes. `MANIFEST.sha256` here is a copy of that file; CI runs `tools/check_vectors.py` (body hash == banner hash == manifest entry, no extra or missing file), and `tools/check_vectors.py --server ../vehicle-server/tests/golden/MANIFEST.sha256` also compares the copy with the server's (local sync check).
 - Size about 3.5 MB; host tests only, never linked into the firmware.
 - Class B (C3 part 2a): `derived_vectors_b.h` (ride marker and closed-value row types) and
   `derived_<scenario>_b.h`: the rides table is the epoch-marker table (start_ms opens a stop epoch,
