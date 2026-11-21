@@ -21,6 +21,7 @@ add_library(vehicle_rtcore_logic STATIC
     features/derived/derived_step.c
     features/derived/derived_init.c
     features/derived/derived_d103.c
+    features/derived/derived_d103_events.c
     features/derived/derived_gear.c
     features/derived/derived_ride.c
     features/derived/derived_windows.c

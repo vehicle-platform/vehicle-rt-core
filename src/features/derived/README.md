@@ -9,8 +9,9 @@ Derived signals of D-070 (catalog section 5), computed on rt-core. **Part 1 and 
 | File | What |
 |---|---|
 | `derived_core.{h,c}` | Pure core (no HAL, RTOS, services, clock): input array in, output table out. Float32, `isfinite` checks, `-fno-math-errno`, refuses `-ffast-math`. Split (FW-2, T27, moves only) into four units: `derived_core.c` (time helpers, rings, input access, integrals, output store, accessors), `derived_formulas.c` (the non-D-103 point formulas, `data_quality_mask`), `derived_step.c` (ingest, grid step, stop event, class-B ride rows, epoch step) and `derived_init.c` (which signals are computed and why not). |
-| `derived_d103.c` | The D-103 class-A formulas, their sample history and the shift/launch/braking/refuel/battery-rest/cranking event state machines, split out of `derived_core.c`. Same purity and float rules (`-ffast-math` refused). |
-| `derived_core_internal.h` | Private interface between the `derived_core*.c` / `derived_formulas.c` / `derived_step.c` / `derived_init.c` units and `derived_d103.c` (`derived_ctx_t`, ring ids, `derived_core_*` / `derived_d103_*`); only `features/derived` may include it (CI layering grep). |
+| `derived_d103.c` | The D-103 class-A point formulas (clutch/neutral/engine-braking states, abuse flags, intake and idle residuals, charging plateau, filtered fuel level), split out of `derived_core.c`. Same purity and float rules (`-ffast-math` refused). |
+| `derived_d103_events.c` | The D-103 sample history and the shift/launch/braking/refuel/battery-rest/cranking event state machines (split out of `derived_d103.c`, T27). |
+| `derived_core_internal.h` | Private interface between the `derived_core*.c` / `derived_formulas.c` / `derived_step.c` / `derived_init.c` units and `derived_d103*.c` (`derived_ctx_t`, ring ids, `derived_core_*` / `derived_d103_*`); only `features/derived` may include it (CI layering grep). |
 | `derived_types.h` | Flags, status, input/output rows, the epoch and the ride selector shared by the core and the ride module. |
 | `derived_ride.{h,c}` | Pure class-B accumulators and closed values (part 2a). |
 | `derived_windows.{h,c}` | Pure D-079 window state machine (W1..W5 from gen/ `vehicle_cl250_window[]`) and the statistics of the 17 window summaries; the event engine (items, open/close, point step, expiries, run/push/end). |
