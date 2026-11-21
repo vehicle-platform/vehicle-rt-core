@@ -30,11 +30,13 @@
 #include "app/comms.h"
 #include "app/host/sim_ecu.h"
 #include "app/host/sim_listener.h"
+#include "app/host/sim_safety.h"
 #include "app/host/sim_tester.h"
 #include "features/cornering/lean.h"
 #include "features/cornering/lean_tx.h"
 #include "features/derived/derived.h"
 #include "features/heartbeat/heartbeat.h"
+#include "features/safety_hb/safety_hb.h"
 #include "features/uds/uds_client.h"
 #include "features/uds/uds_server.h"
 #include "features/vehicle_republish/vehicle_republish.h"
@@ -141,12 +143,14 @@ static uds_client_t client;
 static uds_server_t server;
 static vehicle_republish_t republisher;
 static heartbeat_t heartbeat;
+static safety_hb_t safety_hb;
 static comms_ekf_t ekf;
 static lean_link_t lean_link;
 static lean_ekf_t lean_ekf;
 static lean_tx_t lean_tx;
 static uint32_t imu_pushed; /* SIL IMU feed: samples pushed since start */
 static sim_listener_t listener;
+static sim_safety_t safety_peer;
 
 /* D-080 sink: prints the raw 0x19 answers (D-069 item 6). TODO: the services/ logging manager. */
 static void print_dtc_answer(void* ctx, const uds_client_dtc_answer_t* info, const uint8_t* data,
@@ -221,6 +225,33 @@ static void feed_imu(uint32_t now, uint32_t start)
     }
 }
 
+static void print_derived_summary(void)
+{
+    uint32_t valid = 0u;
+    for (uint32_t i = 0u; i < VEHICLE_CL250_DERIVED_COUNT; i++) {
+        derived_out_t o;
+        if (derived_get(i, &o) && (o.status == DERIVED_VALID)) {
+            valid++;
+        }
+    }
+    printf("vehicle_rtcore_host: derived %u signals computed, %u valid now, at most %u evaluations per step\n",
+           (unsigned)derived_core()->computed_count, (unsigned)valid,
+           (unsigned)derived_core()->evals_max);
+}
+
+/* The 0x082 monitor (D-118 item 6): link counters and the DTC SAFETY_HEARTBEAT_LOST status. */
+static void print_safety_hb_summary(void)
+{
+    const safety_hb_link_t sl = safety_hb_link(&safety_hb);
+    printf("vehicle_rtcore_host: safety heartbeat monitor: %u frames, %u resyncs, %u E2E errors "
+           "(%u wrong length), %u lost events, DTC status 0x%02X\n",
+           (unsigned)sl.frames, (unsigned)sl.resyncs,
+           (unsigned)(sl.wrong_sequence + sl.repeated + sl.wrong_crc + sl.wrong_length +
+                      sl.other_errors),
+           (unsigned)sl.wrong_length, (unsigned)sl.lost_events,
+           (unsigned)diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_HEARTBEAT_LOST));
+}
+
 int main(int argc, char** argv)
 {
     options_t opt;
@@ -263,6 +294,7 @@ int main(int argc, char** argv)
     if (!vbus_attach(&platform_bus, &platform_node) ||
         !can_port_host_bind_vbus(CAN_PORT_PLATFORM, &platform_bus, platform_node) ||
         !sim_listener_init(&listener, &platform_bus) ||
+        !sim_safety_init(&safety_peer, &platform_bus) ||
         (opt.uds_scenario && !sim_tester_init(&tester, &platform_bus, timebase_now_ms()))) {
         fprintf(stderr, "platform bus setup failed\n");
         return 1;
@@ -287,6 +319,10 @@ int main(int argc, char** argv)
     comms_ekf_init(&ekf);
     if (!heartbeat_open(&heartbeat)) {
         fprintf(stderr, "heartbeat setup failed\n");
+        return 1;
+    }
+    if (!safety_hb_open(&safety_hb)) {
+        fprintf(stderr, "safety heartbeat (0x082) monitor setup failed\n");
         return 1;
     }
     /* EKF boot order (D-065, cornering README): link, EKF state, register its alive
@@ -327,6 +363,7 @@ int main(int argc, char** argv)
         if (simulated) {
             sim_ecu_step(&ecu, now);
         }
+        sim_safety_step(&safety_peer, now); /* the simulated safety MCU's 0x082 */
         if (opt.uds_scenario) {
             sim_tester_step(&tester, now);
             if (sim_tester_finished(&tester)) {
@@ -340,7 +377,7 @@ int main(int argc, char** argv)
             ekf_at = now;
             ekf_started = true;
         }
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &lean_tx);
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &lean_tx, &safety_hb);
         derived_step(now); /* below the comms task: after its pass, QM information */
         sim_listener_step(&listener, now);
 
@@ -387,16 +424,7 @@ int main(int argc, char** argv)
            (unsigned)ss->requests, (unsigned)ss->positive, (unsigned)ss->negative,
            (unsigned)ss->suppressed, (unsigned)ss->s3_timeouts);
     if (!opt.quiet) {
-        uint32_t valid = 0u;
-        for (uint32_t i = 0u; i < VEHICLE_CL250_DERIVED_COUNT; i++) {
-            derived_out_t o;
-            if (derived_get(i, &o) && (o.status == DERIVED_VALID)) {
-                valid++;
-            }
-        }
-        printf("vehicle_rtcore_host: derived %u signals computed, %u valid now, at most %u evaluations per step\n",
-               (unsigned)derived_core()->computed_count, (unsigned)valid,
-               (unsigned)derived_core()->evals_max);
+        print_derived_summary();
     }
     const int listener_ok = sim_listener_passed(&listener);
     printf("vehicle_rtcore_host: EKF lean 0x%03X %u sent, %u retried, %u dropped; last state %d "
@@ -410,6 +438,7 @@ int main(int argc, char** argv)
            (unsigned)republisher.speed.retried, (unsigned)republisher.speed.dropped,
            (unsigned)PLATFORM_VEHICLE_ENGINE_FRAME_ID, (unsigned)republisher.engine.sent,
            (unsigned)republisher.engine.retried, (unsigned)republisher.engine.dropped);
+    print_safety_hb_summary();
     printf("vehicle_rtcore_host: heartbeat 0x%03X %u sent, %u retried, %u dropped; listener %u frames "
            "(E2E %u ok, %u bad, longest gap %u ms), %u NORMAL, %u DEGRADED, %u bad mode, "
            "%u uptime decreases, last uptime %u s\n",

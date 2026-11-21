@@ -13,12 +13,12 @@
  *    0x020 / 0x081 IDs (masquerade) change nothing: rt-core's own 0x022 / 0x120 (if it
  *    ever sends them) are the same with and without the injection and never carry an
  *    injected LOCK (D-118; a release 0x120 comes from rt-core's own state only).
- *  - The two retired SAFETY_MAILBOX DTCs stay unset through a run with bus faults.
  */
 #include "app/comms.h"
 #include "app/host/sim_ecu.h"
 #include "features/cornering/lean.h"
 #include "features/cornering/lean_tx.h"
+#include "features/safety_hb/safety_hb.h"
 #include "hal/host/can_port_host.h"
 #include "hal/host/hal_time_host.h"
 #include "hal/host/imu_host.h"
@@ -52,6 +52,11 @@ static lean_link_t link;
 static lean_ekf_t lean;
 static lean_tx_t tx;
 static sim_ecu_t ecu;
+/* D-118 item 6: the 0x082 monitor, opened only in the tests that ask for it (sh_on) */
+static safety_hb_t sh;
+static bool sh_on;
+static uint32_t sh_peer_until_ms; /* the simulated safety MCU is silent from here on */
+static vehicle_e2e_tx_state_t sh_peer_tx;
 
 typedef struct {
     uint32_t frames;
@@ -63,6 +68,7 @@ typedef struct {
     uint32_t e2e_ok;
     uint32_t e2e_bad; /* anything but OK after the first (INITIAL) frame */
     vehicle_e2e_rx_state_t rx;
+    uint32_t digest; /* over every frame's time and bytes */
 } stream_t;
 
 typedef struct {
@@ -73,6 +79,8 @@ typedef struct {
     uint32_t request_n;       /* rt-core's own 0x120 */
     uint8_t request[LOG_CAP][8];
     uint32_t unrouted; /* can_if_unrouted_count(PLATFORM) at the end */
+    uint32_t dtc_status; /* DTC SAFETY_HEARTBEAT_LOST at the end */
+    uint32_t dtc_failed_passes; /* passes with its TEST_FAILED bit set */
 } seen_t;
 
 void setUp(void) {}
@@ -100,6 +108,8 @@ static void rig_up(void)
     TEST_ASSERT_EQUAL(ISOTP_OK, uds_server_open(&server));
     TEST_ASSERT_TRUE(vehicle_republish_open(&republisher));
     TEST_ASSERT_TRUE(heartbeat_open(&heartbeat));
+    TEST_ASSERT_TRUE(!sh_on || safety_hb_open(&sh));
+    vehicle_e2e_tx_init(&sh_peer_tx);
     comms_ekf_init(&ekf);
     lean_link_init(&link);
     lean_ekf_init(&lean, &link);
@@ -138,6 +148,10 @@ static void note(stream_t* s, uint32_t now, uint16_t data_id, uint8_t max_delta,
     }
     s->last_ms = now;
     s->frames++;
+    s->digest = (s->digest * 16777619u) ^ now;
+    for (size_t i = 0u; i < len; i++) {
+        s->digest = (s->digest * 16777619u) ^ f->data[i];
+    }
 }
 
 /* What a hostile or faulty peer puts on the platform bus: the safety MCU's IDs, an
@@ -190,7 +204,18 @@ static seen_t run(bool inject)
         if (inject && ((now % 20u) == 0u)) {
             inject_frames(now);
         }
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
+        if (sh_on && (now < sh_peer_until_ms) && ((now % PLATFORM_HEARTBEAT_SAFETY_CYCLE_TIME_MS) == 0u)) {
+            /* the safety MCU's 0x082: valid E2E, zero payload (rt-core never decodes it) */
+            can_frame_t hb82;
+            (void)memset(&hb82, 0, sizeof hb82);
+            hb82.id = PLATFORM_HEARTBEAT_SAFETY_FRAME_ID;
+            hb82.dlc = (uint8_t)PLATFORM_HEARTBEAT_SAFETY_LENGTH;
+            TEST_ASSERT_EQUAL(VEHICLE_E2E_OK, vehicle_e2e_protect(PLATFORM_HEARTBEAT_SAFETY_E2E_DATA_ID, hb82.data,
+                                                              PLATFORM_HEARTBEAT_SAFETY_LENGTH, &sh_peer_tx));
+            TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &hb82));
+        }
+        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx, sh_on ? &sh : NULL);
+        seen.dtc_failed_passes += ((diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_HEARTBEAT_LOST) & 0x01u) != 0u) ? 1u : 0u;
         can_frame_t got;
         while (vbus_recv(&bus_p, node_peer, &got) == CAN_PORT_OK) {
             if (got.extended) {
@@ -220,6 +245,7 @@ static seen_t run(bool inject)
         hal_time_host_advance(1u);
     }
     seen.unrouted = can_if_unrouted_count(CAN_PORT_PLATFORM);
+    seen.dtc_status = diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_HEARTBEAT_LOST);
     can_port_host_unbind_all();
     hal_time_host_use_monotonic();
     return seen;
@@ -276,43 +302,51 @@ static void test_injected_frames_are_filtered_and_rt_core_0x120_never_depends_on
     }
 }
 
-/* Safety review MINOR-5: nothing reports the two retired mailbox DTCs, whatever the buses do. */
-static void test_the_retired_mailbox_dtcs_stay_unset_through_bus_faults(void)
+/* D-118 item 6: the 0x082 monitor reports its DTC through the real comms_pass() and nothing
+ * else changes: 0x081 and 0x020 are byte-for-byte and time-for-time the same with the safety
+ * MCU alive, silent from 600 ms on, or not monitored at all (NODE_MODE, ERROR_COUNT, the
+ * counters, E2E all follow from the bytes). */
+static void test_the_0x082_monitor_sets_its_dtc_and_changes_nothing_rt_core_sends(void)
 {
+    sh_on = false;
     rig_up();
-    for (uint32_t i = 0u; i < RUN_MS; i++) {
-        const uint32_t now = timebase_now_ms();
-        if ((now % PLATFORM_EKF_LEAN_CYCLE_TIME_MS) == 0u) {
-            lean_ekf_step(&lean, now);
-        }
-        sim_ecu_step(&ecu, now);
-        if (i == 500u) {
-            vbus_set_bus_off(&bus_p, node_platform, true);
-            vbus_set_bus_off(&bus_v, node_vehicle, true);
-        }
-        if (i == 900u) {
-            vbus_recover(&bus_p, node_platform);
-            vbus_recover(&bus_v, node_vehicle);
-            vbus_set_tx_stalled(&bus_p, node_platform, true);
-        }
-        if (i == 1300u) {
-            vbus_set_tx_stalled(&bus_p, node_platform, false);
-        }
-        inject_frames(now);
-        comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx);
-        hal_time_host_advance(1u);
-    }
-    TEST_ASSERT_EQUAL_UINT8(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_LAYOUT_MISMATCH));
-    TEST_ASSERT_EQUAL_UINT8(0u, diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_MAILBOX_SLOT_FROZEN));
-    can_port_host_unbind_all();
-    hal_time_host_use_monotonic();
+    const seen_t unmonitored = run(false);
+
+    sh_on = true;
+    sh_peer_until_ms = UINT32_MAX;
+    rig_up();
+    const seen_t alive = run(false);
+    TEST_ASSERT_EQUAL_UINT32(0u, alive.dtc_failed_passes);
+    TEST_ASSERT_EQUAL_UINT32(0u, alive.dtc_status);
+    TEST_ASSERT_TRUE(safety_hb_link(&sh).frames >= (RUN_MS / PLATFORM_HEARTBEAT_SAFETY_CYCLE_TIME_MS) - 2u);
+    TEST_ASSERT_EQUAL_UINT32(0u, safety_hb_link(&sh).wrong_crc);
+
+    sh_peer_until_ms = START_MS + 600u;
+    rig_up();
+    const seen_t silent = run(false);
+    TEST_ASSERT_TRUE(silent.dtc_failed_passes > 0u);
+    TEST_ASSERT_NOT_EQUAL(0u, silent.dtc_status & 0x09u); /* TEST_FAILED, CONFIRMED_DTC */
+    TEST_ASSERT_EQUAL_UINT32(1u, safety_hb_link(&sh).lost_events);
+
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.hb.frames, alive.hb.frames);
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.hb.frames, silent.hb.frames);
+    TEST_ASSERT_NOT_EQUAL(0u, unmonitored.hb.digest);
+    TEST_ASSERT_NOT_EQUAL(0u, unmonitored.lean.digest);
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.hb.digest, alive.hb.digest);
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.hb.digest, silent.hb.digest);
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.lean.digest, alive.lean.digest);
+    TEST_ASSERT_EQUAL_UINT32(unmonitored.lean.digest, silent.lean.digest);
+    TEST_ASSERT_EQUAL_UINT32(0u, silent.hb.e2e_bad);
+    TEST_ASSERT_EQUAL_UINT32(0u, silent.lean.e2e_bad);
+    TEST_ASSERT_EQUAL_UINT32(0u, silent.other_safety);
+    sh_on = false;
 }
 
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_0x020_and_0x081_are_on_the_platform_bus_at_their_cycles_with_valid_e2e);
+    RUN_TEST(test_the_0x082_monitor_sets_its_dtc_and_changes_nothing_rt_core_sends);
     RUN_TEST(test_injected_frames_are_filtered_and_rt_core_0x120_never_depends_on_them);
-    RUN_TEST(test_the_retired_mailbox_dtcs_stay_unset_through_bus_faults);
     return UNITY_END();
 }

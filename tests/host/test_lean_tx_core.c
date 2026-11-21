@@ -251,6 +251,51 @@ static void test_clamping_a_real_core_output_leaves_the_filter_unchanged(void)
     TEST_ASSERT_TRUE(r.out.roll_deg > 55.0f); /* the record itself is not clamped either */
 }
 
+/* v0.30.0 (E-6, E-7): the frame is built with the checked encoders and pack_checked. */
+static void test_the_checked_encoders_give_the_same_raw_values_as_the_plain_ones(void)
+{
+    for (float roll = -59.9f; roll < 59.95f; roll += 0.37f) {
+        const lean_record_t r = rec(roll, 100u, LEAN_OUT_ESTIMATED, NOW);
+        const struct platform_ekf_lean_t m = msg_for(&r, false, NOW);
+        const float shown = (fabsf(roll) > PLATFORM_LIMIT_LEAN_ANGLE_CLAMP_MAX_DEG)
+                                ? ((roll > 0.0f) ? PLATFORM_LIMIT_LEAN_ANGLE_CLAMP_MAX_DEG
+                                                 : -PLATFORM_LIMIT_LEAN_ANGLE_CLAMP_MAX_DEG)
+                                : roll;
+        TEST_ASSERT_EQUAL_INT16(platform_ekf_lean_lean_angle_encode(shown), m.lean_angle);
+        TEST_ASSERT_EQUAL_UINT8(platform_ekf_lean_lean_angle_quality_encode(100.0f), m.lean_angle_quality);
+        TEST_ASSERT_NOT_EQUAL(PLATFORM_EKF_LEAN_LEAN_ANGLE_STATE_INVALID_CHOICE, m.lean_angle_state);
+    }
+}
+
+static void test_a_non_finite_roll_never_becomes_a_valid_looking_zero_lean(void)
+{
+    const float bad[3] = {NAN, INFINITY, -INFINITY};
+    for (uint32_t i = 0u; i < 3u; i++) {
+        const lean_record_t r = rec(bad[i], 100u, LEAN_OUT_ESTIMATED, NOW);
+        const struct platform_ekf_lean_t m = msg_for(&r, false, NOW);
+        assert_invalid_msg(&m); /* INVALID, 0.00 deg, quality 0: the same fallback as before */
+    }
+}
+
+static void test_pack_checked_refuses_an_undefined_state_and_writes_nothing(void)
+{
+    const lean_record_t r = rec(10.0f, 100u, LEAN_OUT_ESTIMATED, NOW);
+    struct platform_ekf_lean_t m = msg_for(&r, false, NOW);
+    vehicle_e2e_tx_state_t committed;
+    vehicle_e2e_tx_init(&committed);
+    vehicle_e2e_tx_state_t next;
+    uint8_t data[PLATFORM_EKF_LEAN_LENGTH];
+    (void)memset(data, 0xA5, sizeof data);
+    m.lean_angle_state = 4u; /* outside the 2-bit value table */
+    TEST_ASSERT_FALSE(lean_tx_frame(&m, &committed, &next, data));
+    for (uint32_t i = 0u; i < sizeof data; i++) {
+        TEST_ASSERT_EQUAL_UINT8(0xA5u, data[i]); /* the plain pack would have masked it into a frame */
+    }
+    m.lean_angle_state = (uint8_t)PLATFORM_EKF_LEAN_LEAN_ANGLE_STATE_ESTIMATED_CHOICE;
+    m.lean_angle_quality = 255u; /* outside the DBC range */
+    TEST_ASSERT_FALSE(lean_tx_frame(&m, &committed, &next, data));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -262,6 +307,9 @@ int main(void)
     RUN_TEST(test_a_slightly_future_stamp_is_age_zero_MAJOR_2);
     RUN_TEST(test_snapshot_faults_and_null_read_invalid_MAJOR_4);
     RUN_TEST(test_the_frame_is_packed_and_e2e_protected_on_a_copy);
+    RUN_TEST(test_the_checked_encoders_give_the_same_raw_values_as_the_plain_ones);
+    RUN_TEST(test_a_non_finite_roll_never_becomes_a_valid_looking_zero_lean);
+    RUN_TEST(test_pack_checked_refuses_an_undefined_state_and_writes_nothing);
     RUN_TEST(test_clamping_a_real_core_output_leaves_the_filter_unchanged);
     return UNITY_END();
 }

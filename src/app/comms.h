@@ -7,6 +7,7 @@
  *   can_sm_step(VEHICLE)  -> can_if_dispatch(VEHICLE)  -> uds_client_step()
  *                                                      -> lean_tx_publish_speed()
  *   can_sm_step(PLATFORM) -> can_if_dispatch(PLATFORM) -> vehicle_republish_step()
+ *                                                      -> safety_hb_step()  (0x082 monitor)
  *                                                      -> heartbeat_step()
  *                                                      -> lean_tx_step()  (0x020)
  *                                                      -> uds_server_step()
@@ -22,6 +23,10 @@
  * newest output as 0x020 (D-065 item 2: the EKF task never touches can_if). After
  * lean_tx_step() the pass also sets the comms-side flags of DID 0xFD03 (services/lean_health)
  * for the UDS server step that follows (D-067).
+ * The 0x082 monitor (features/safety_hb, D-118 item 6) reports the diagnostic-only DTC
+ * SAFETY_HEARTBEAT_LOST from the frames this pass just dispatched. It is diagnostic input
+ * only: nothing it sees reaches 0x020, the EKF, the heartbeat or the safety MCU (the DTC is
+ * not a heartbeat class, services/diag).
  * The heartbeat (0x081, D-064) follows for the same reasons; it sees the DTC results
  * the server's monitors reported in the previous pass, and reads their conditions
  * directly as well, so a server that does not step never makes it read healthy.
@@ -49,6 +54,7 @@
 
 #include "features/cornering/lean_tx.h"
 #include "features/heartbeat/heartbeat.h"
+#include "features/safety_hb/safety_hb.h"
 #include "features/uds/uds_client.h"
 #include "features/uds/uds_server.h"
 #include "features/vehicle_republish/vehicle_republish.h"
@@ -113,9 +119,11 @@ bool comms_apply_filters(void);
  * and makes the heartbeat read a stalled EKF (D-065 amendment). A registered EKF with no
  * open lean (NULL, closed, or a failed lean_tx_open() at boot) reads as stalled too: the
  * heartbeat is DEGRADED and 0xFD03 EKF_ALIVE_OK is clear (D-086, ISSUES E-22 (1)). A
- * zeroed ekf (no EKF registered) with no lean is "no EKF", not stalled. */
+ * zeroed ekf (no EKF registered) with no lean is "no EKF", not stalled.
+ * safety_hb: NULL or a closed monitor reports nothing (no DTC); it never changes any other
+ * argument's behaviour. */
 void comms_pass(uds_client_t* client, uds_server_t* server, vehicle_republish_t* republisher,
-                heartbeat_t* heartbeat, comms_ekf_t* ekf, lean_tx_t* lean);
+                heartbeat_t* heartbeat, comms_ekf_t* ekf, lean_tx_t* lean, safety_hb_t* safety_hb);
 
 #ifdef __cplusplus
 }

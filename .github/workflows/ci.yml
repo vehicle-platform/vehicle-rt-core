@@ -211,11 +211,42 @@ jobs:
             echo "::error::can_if_write() is called by features/uds/isotp_link and services/com only"
             exit 1
           fi
-          # The safety MCU's own IDs (0x023, 0x082) appear nowhere in src/: rt-core neither
-          # sends nor registers them. Allow-list one file here later if a 0x082
-          # heartbeat-lost monitor needs the ID for RX.
-          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_(SAFETY_WARNING_STATUS|HEARTBEAT_SAFETY)_FRAME_ID' src; then
-            echo "::error::0x023 / 0x082 belong to the safety MCU: their frame IDs must not appear in src/"
+          # The safety MCU's own IDs: 0x023 appears nowhere in src/ (rt-core neither sends nor
+          # registers it); 0x082 only in the diagnostic monitor (features/safety_hb, D-118 item 6,
+          # the one receiver) and the host SIL's simulated safety MCU (the sender of its test frames).
+          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_SAFETY_WARNING_STATUS_FRAME_ID' src; then
+            echo "::error::0x023 belongs to the safety MCU: its frame ID must not appear in src/"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_HEARTBEAT_SAFETY_FRAME_ID' src \
+              | grep -vE '^src/(features/safety_hb/safety_hb\.c|app/host/sim_safety\.c):'; then
+            echo "::error::0x082's frame ID appears in src/features/safety_hb/safety_hb.c (receiver) and src/app/host/sim_safety.c only"
+            exit 1
+          fi
+          # D-118 item 6: the received 0x082 is diagnostic input only. Its E2E check, state and
+          # link counters stay in features/safety_hb; no other feature, and no service or app
+          # code except the comms pass (the one step call) and the host program, uses the module,
+          # so it cannot reach 0x020, the EKF, the heartbeat or anything sent to the safety MCU.
+          if grep -rnE --include='*.c' --include='*.h' 'platform_heartbeat_safety_|PLATFORM_HEARTBEAT_SAFETY_E2E|safety_hb' src \
+              | grep -vE '^src/(features/safety_hb/[a-z_]+\.[ch]|app/comms\.(c|h)|app/host/(main|sim_safety)\.(c|h)|services/diag\.(c|h)):'; then
+            echo "::error::the 0x082 monitor (safety_hb, platform_heartbeat_safety_*) is used by features/safety_hb, app/comms and the host program only"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'safety_hb_step[[:space:]]*\(' src \
+              | grep -vE '^src/(features/safety_hb/safety_hb\.(c|h)|app/comms\.(c|h)):'; then
+            echo "::error::safety_hb_step() has one call site: src/app/comms.c"
+            exit 1
+          fi
+          # The DTC is classified diagnostic only by the generated flag (services/diag.c); its
+          # index is reported by the monitor alone (D-118 item 6).
+          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_HEARTBEAT_LOST' src \
+              | grep -vE '^src/(services/diag\.c|features/safety_hb/safety_hb\.c|app/host/main\.c):'; then
+            echo "::error::DTC_IDX_SAFETY_HEARTBEAT_LOST appears in services/diag.c, features/safety_hb/safety_hb.c and the host program only"
+            exit 1
+          fi
+          if grep -rnE --include='*.c' --include='*.h' 'diag_dtc_report[[:space:]]*\([^;]*SAFETY_HEARTBEAT_LOST' src \
+              | grep -vE '^src/features/safety_hb/safety_hb\.c:'; then
+            echo "::error::only features/safety_hb reports SAFETY_HEARTBEAT_LOST"
             exit 1
           fi
           # 0x120 SafetyRequest: at most one future sender file (none today), which never
@@ -227,17 +258,6 @@ jobs:
           fi
           if [ -n "$req" ] && grep -nE 'can_if_register_rx' $req; then
             echo "::error::the 0x120 sender must not register a platform receiver"
-            exit 1
-          fi
-          # The two retired mailbox DTCs are never reported (safety review MINOR-5).
-          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' src \
-              | grep -vE '^src/services/diag\.c:'; then
-            echo "::error::the SAFETY_MAILBOX DTC indices appear in src/services/diag.c only (never reported, D-118)"
-            exit 1
-          fi
-          if grep -rnE --include='*.c' --include='*.h' 'DTC_IDX_SAFETY_MAILBOX' tests \
-              | grep -vE '^tests/host/(test_diag|test_platform_tx)\.c:'; then
-            echo "::error::the SAFETY_MAILBOX DTC indices appear in tests/host/test_diag.c and test_platform_tx.c only"
             exit 1
           fi
 
