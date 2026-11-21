@@ -25,7 +25,7 @@ bool safety_hb_open(safety_hb_t* m)
         return false;
     }
     (void)memset(m, 0, sizeof *m);
-    safety_hb_core_init(&m->core, timebase_now_ms());
+    safety_hb_core_init(&m->core);
     m->opened = (can_if_register_rx(CAN_PORT_PLATFORM, PLATFORM_HEARTBEAT_SAFETY_FRAME_ID,
                                     PLATFORM_HEARTBEAT_SAFETY_IS_EXTENDED != 0,
                                     safety_hb_on_rx,

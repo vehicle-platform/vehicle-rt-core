@@ -22,7 +22,8 @@ static vehicle_e2e_tx_state_t tx;
 
 void setUp(void)
 {
-    safety_hb_core_init(&core, T0);
+    safety_hb_core_init(&core);
+    (void)safety_hb_core_lost(&core, T0); /* the first pass anchors the grace */
     vehicle_e2e_tx_init(&tx);
 }
 
@@ -166,7 +167,7 @@ static void test_counters_saturate_and_null_is_safe(void)
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, core.link.frames);
     TEST_ASSERT_TRUE(safety_hb_core_lost(&core, T0 + TIMEOUT + 1000u));
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, core.link.lost_events);
-    safety_hb_core_init(NULL, 0u);
+    safety_hb_core_init(NULL);
     safety_hb_core_rx(NULL, NULL, 0u, 0u);
     safety_hb_core_rx(&core, NULL, 8u, 0u);
     TEST_ASSERT_TRUE(safety_hb_core_lost(NULL, 0u));
@@ -175,7 +176,8 @@ static void test_counters_saturate_and_null_is_safe(void)
 static void test_the_verdict_is_wrap_safe(void)
 {
     const uint32_t t = UINT32_MAX - 50u;
-    safety_hb_core_init(&core, t);
+    safety_hb_core_init(&core);
+    (void)safety_hb_core_lost(&core, t);
     send(t);
     send(t + CYCLE); /* wraps past 0 */
     TEST_ASSERT_FALSE(safety_hb_core_lost(&core, t + CYCLE + TIMEOUT));

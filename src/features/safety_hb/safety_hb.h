@@ -22,7 +22,7 @@ typedef struct {
     bool opened; /* the receiver is registered: the only state that monitors */
 } safety_hb_t;
 
-/* Resets m, anchors the start-up grace at the current timebase reading and registers the
+/* Resets m (the start-up grace starts at the first safety_hb_step()) and registers the
  * 0x082 receiver on the platform port. False (monitor stays closed) if can_if refused it
  * (sealed, listed already, full). Boot only, before comms_apply_filters(). */
 bool safety_hb_open(safety_hb_t* m);

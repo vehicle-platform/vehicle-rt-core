@@ -11,13 +11,14 @@ static void bump(uint32_t* counter)
     }
 }
 
-void safety_hb_core_init(safety_hb_core_t* c, uint32_t start_ms)
+void safety_hb_core_init(safety_hb_core_t* c)
 {
     if (c == NULL) {
         return;
     }
     vehicle_e2e_rx_init(&c->e2e);
-    c->start_ms = start_ms;
+    c->start_ms = 0u;
+    c->armed = false;
     c->seen = false;
     c->lost = false;
     c->link.frames = 0u;
@@ -75,6 +76,10 @@ bool safety_hb_core_lost(safety_hb_core_t* c, uint32_t now_ms)
 {
     if (c == NULL) {
         return true;
+    }
+    if (!c->armed) {
+        c->armed = true; /* the grace runs from the first pass, not from open */
+        c->start_ms = now_ms;
     }
     bool lost = false;
     if (platform_heartbeat_safety_e2e_check_timeout(&c->e2e, now_ms) == VEHICLE_E2E_NO_NEW_DATA) {

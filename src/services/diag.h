@@ -7,8 +7,8 @@
  * reports (0xFD00, 0xFD02; D-040, D-055). The UDS client glue writes the status, the
  * step counters and its DTC results; the UDS server glue reads them, clears the DTCs and
  * reports its own monitors (VEHICLE_TESTER_LATCHED supervision, VEHICLE_BUS_OFF_LATCHED
- * from services/can_sm) and the safety-heartbeat monitor (features/safety_hb, DTC
- * SAFETY_HEARTBEAT_LOST, diagnostic only, D-118 item 6). No feature includes another, and
+ * from services/can_sm) and the safety-heartbeat monitor (the 0x082 monitor,
+ * DTC U0167-00, diagnostic only, D-118 item 6). No feature includes another, and
  * diag includes no other service.
  *
  * DTCs are the gen/ table (platform_uds.h, platform_uds_dtcs[]), indexed by

@@ -34,6 +34,11 @@ static bool steps_lost; /* sticky like tester_lost, until the next write */
  * fallback lean (D-042 item 3). Every other DTC counts. One entry per gen/ DTC: a new DTC
  * is listed here with its generated flag (an unlisted index counts, the safe side for the
  * heartbeat). */
+/* A new DTC must be classified in the table below: this fails the build until it is. */
+_Static_assert(PLATFORM_UDS_DTC_COUNT == 4u,
+               "a DTC was added or removed in gen/: classify it in counts_for_heartbeat() "
+               "(heartbeat class or diagnostic only) and update this count after review");
+
 static bool counts_for_heartbeat(uint32_t idx)
 {
     static const bool dtc_diagnostic_only[PLATFORM_UDS_DTC_COUNT] = {

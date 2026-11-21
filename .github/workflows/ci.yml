@@ -214,7 +214,7 @@ jobs:
           # The safety MCU's own IDs: 0x023 appears nowhere in src/ (rt-core neither sends nor
           # registers it); 0x082 only in the diagnostic monitor (features/safety_hb, D-118 item 6,
           # the one receiver) and the host SIL's simulated safety MCU (the sender of its test frames).
-          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_SAFETY_WARNING_STATUS_FRAME_ID' src; then
+          if grep -rnE --include='*.c' --include='*.h' 'PLATFORM_SAFETY_WARNING_STATUS_' src; then
             echo "::error::0x023 belongs to the safety MCU: its frame ID must not appear in src/"
             exit 1
           fi
@@ -228,13 +228,30 @@ jobs:
           # code except the comms pass (the one step call) and the host program, uses the module,
           # so it cannot reach 0x020, the EKF, the heartbeat or anything sent to the safety MCU.
           if grep -rnE --include='*.c' --include='*.h' 'platform_heartbeat_safety_|PLATFORM_HEARTBEAT_SAFETY_E2E|safety_hb' src \
-              | grep -vE '^src/(features/safety_hb/[a-z_]+\.[ch]|app/comms\.(c|h)|app/host/(main|sim_safety)\.(c|h)|services/diag\.(c|h)):'; then
+              | grep -vE '^src/(features/safety_hb/[a-z_]+\.[ch]|app/comms\.(c|h)|app/host/(main|sim_safety)\.(c|h)):'; then
             echo "::error::the 0x082 monitor (safety_hb, platform_heartbeat_safety_*) is used by features/safety_hb, app/comms and the host program only"
             exit 1
           fi
           if grep -rnE --include='*.c' --include='*.h' 'safety_hb_step[[:space:]]*\(' src \
               | grep -vE '^src/(features/safety_hb/safety_hb\.(c|h)|app/comms\.(c|h)):'; then
             echo "::error::safety_hb_step() has one call site: src/app/comms.c"
+            exit 1
+          fi
+          # Raw vehicle_e2e_protect() (a hand-built protected frame) only in the host SIL's
+          # simulated peers; firmware senders protect through the generated per-message wrappers.
+          if grep -rnE --include='*.c' --include='*.h' 'vehicle_e2e_protect[[:space:]]*\(' src \
+              | grep -vE '^src/app/host/'; then
+            echo "::error::raw vehicle_e2e_protect() belongs to src/app/host/ only; use the generated platform_<msg>_e2e_protect()"
+            exit 1
+          fi
+          # The simulated safety MCU is bound to the in-process bus only: it takes a vbus_t and
+          # never includes the SocketCAN backend, and the host program hands it the platform bus.
+          if grep -nE 'socketcan|can_port_host|can_port\.h' src/app/host/sim_safety.c src/app/host/sim_safety.h; then
+            echo "::error::sim_safety must not touch a real or vcan interface (in-process vbus only)"
+            exit 1
+          fi
+          if grep -n 'sim_safety_init' src/app/host/main.c | grep -v '&platform_bus'; then
+            echo "::error::sim_safety_init() must be given the in-process platform bus"
             exit 1
           fi
           # The DTC is classified diagnostic only by the generated flag (services/diag.c); its

@@ -17,8 +17,9 @@
  * WRONG_LENGTH, BAD_ARGUMENT) goes to the link counters only; a sender that keeps
  * repeating its counter or sending bad frames still ends up silent for the check, which is
  * the generated semantics. Before the first valid frame the monitor allows the same
- * timeout from its init (start-up grace: the safety MCU boots on its own schedule), then
- * reads lost. Static storage, no heap, no ISR use.
+ * timeout from its first safety_hb_core_lost() call, i.e. the first comms pass (start-up
+ * grace: the safety MCU boots on its own schedule, and the boot between open and the
+ * scheduler start may be long), then reads lost. Static storage, no heap, no ISR use.
  */
 
 #include "platform_e2e.h"
@@ -45,14 +46,15 @@ typedef struct {
 
 typedef struct {
     vehicle_e2e_rx_state_t e2e;
-    uint32_t start_ms;  /* the init time: the start-up grace runs from here */
+    uint32_t start_ms;  /* the first verdict call: the start-up grace runs from here */
+    bool armed;         /* start_ms is set */
     bool seen;          /* a frame passed the CRC since init (grace is over for good) */
     bool lost;          /* the last verdict */
     safety_hb_link_t link;
 } safety_hb_core_t;
 
-/* Resets the state; start_ms is the timebase reading at open. */
-void safety_hb_core_init(safety_hb_core_t* c, uint32_t start_ms);
+/* Resets the state. The start-up grace is anchored later, at the first verdict call. */
+void safety_hb_core_init(safety_hb_core_t* c);
 
 /* One received 0x082 frame (payload and DLC as read from the bus) at now_ms. Runs the
  * generated platform_heartbeat_safety_e2e_check() and sorts the status into the counters.
