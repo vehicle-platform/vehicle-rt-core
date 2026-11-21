@@ -4,8 +4,8 @@
 /*
  * Private interface between derived_core.c (time helpers, ring storage, input access, integrals,
  * output store), derived_formulas.c (class-A point formulas), derived_step.c (scheduler),
- * derived_init.c (which signals are computed) and derived_d103.c (the D-103 class-A formulas,
- * their sample history and event state machines). Only the files in features/derived may include
+ * derived_init.c (which signals are computed), derived_d103.c (the D-103 class-A formulas) and
+ * derived_d103_events.c (their sample history and event state machines). Only the files in features/derived may include
  * it (CI layering check); everything else uses derived_core.h.
  */
 
@@ -92,11 +92,16 @@ derived_flag_t eval_point(const derived_ctx_t* x, float* out);
 
 /* ---- provided by derived_d103.c --------------------------------------------------------- */
 
-/* Records the D-103 sample history (RPM, battery, fuel, event baselines) after the ingest. */
-void derived_d103_record(derived_core_t* c);
+/* The newest sample of ring `id` at or before `at`, if it is within `limit` ms (shared with the events). */
+bool ring_lookup(derived_core_t* c, uint32_t id, uint32_t at, uint32_t limit, float* v);
 
 /* Evaluates the D-103 point formula of `x->sig`; MATH_ERROR for any other signal. */
 derived_flag_t derived_d103_eval_point(const derived_ctx_t* x, float* out);
+
+/* ---- provided by derived_d103_events.c -------------------------------------------------- */
+
+/* Records the D-103 sample history (RPM, battery, fuel, event baselines) after the ingest. */
+void derived_d103_record(derived_core_t* c);
 
 /* Runs the D-103 event state machine of `sig`; does nothing for any other signal. */
 void derived_d103_event_step(derived_core_t* c, uint32_t sig);
