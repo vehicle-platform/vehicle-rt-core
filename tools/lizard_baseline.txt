@@ -15,7 +15,7 @@ F src/features/derived/derived_d103_events.c::derived_d103_record 17 44
 F src/features/derived/derived_formulas.c::eval_point 26 88
 F src/features/derived/derived_init.c::classify 39 71
 F src/features/derived/derived_ride.c::apply_row 18 60
-F src/features/derived/derived_ride.c::raw_simple 30 90
+F src/features/derived/derived_ride_final.c::raw_simple 30 90
 F src/features/derived/derived_step.c::ride_confirm_rows 20 50
 F src/features/derived/derived_windows.c::apply_item 28 84
 F src/features/derived/derived_windows.c::win_eval_point 33 90
@@ -29,5 +29,4 @@ F src/features/uds/uds_server.c::provider_read_did 24 56
 F src/services/can_if.c::can_if_tx_allowed 16 40
 F src/services/can_sm_core.c::can_sm_core_step 22 61
 F src/services/imu_core.c::imu_core_finish 23 75
-L src/features/derived/derived_ride.c 723
 L src/features/uds/uds_client_core.c 967
