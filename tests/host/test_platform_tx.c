@@ -24,6 +24,8 @@
 #include "hal/host/imu_host.h"
 #include "platform.h"
 #include "platform_e2e.h"
+#include "platform_uds.h"
+#include "uds_iso14229.h"
 #include "services/can_if.h"
 #include "services/diag.h"
 #include "services/timebase.h"
@@ -55,6 +57,7 @@ static sim_ecu_t ecu;
 /* D-118 item 6: the 0x082 monitor, opened only in the tests that ask for it (sh_on) */
 static safety_hb_t sh;
 static bool sh_on;
+static bool sh_hostile; /* a hostile 0x082 stream and UDS requests share the bus */
 static uint32_t sh_peer_until_ms; /* the simulated safety MCU is silent from here on */
 static vehicle_e2e_tx_state_t sh_peer_tx;
 
@@ -80,6 +83,9 @@ typedef struct {
     uint8_t request[LOG_CAP][8];
     uint32_t unrouted; /* can_if_unrouted_count(PLATFORM) at the end */
     uint32_t dtc_status; /* DTC SAFETY_HEARTBEAT_LOST at the end */
+    uint32_t uds_requests;
+    uint32_t uds_answers;
+    uint32_t hostile_sent;
     uint32_t dtc_failed_passes; /* passes with its TEST_FAILED bit set */
 } seen_t;
 
@@ -188,6 +194,46 @@ static void inject_frames(uint32_t now)
     TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &r));
 }
 
+/* A hostile 0x082 stream: every 10 ms a burst of 40 frames (more than the 32 dispatched per
+ * pass) with a bad CRC, a wrong DLC or random counters, plus a physical TesterPresent request
+ * every 20 ms that must still be answered. The host port has one queue, so this also shows the
+ * bounded dispatch never starves the UDS server (on the target the 0x7xx IDs sit in FIFO1,
+ * apart from the 0x082 traffic in FIFO0). */
+static void hostile_burst(uint32_t now, seen_t* seen)
+{
+    if ((now % 10u) == 0u) {
+        for (uint32_t k = 0u; k < 40u; k++) {
+            can_frame_t f;
+            (void)memset(&f, 0, sizeof f);
+            f.id = PLATFORM_HEARTBEAT_SAFETY_FRAME_ID;
+            f.dlc = (uint8_t)PLATFORM_HEARTBEAT_SAFETY_LENGTH;
+            f.data[1] = (uint8_t)(k & 0x0Fu);
+            if ((k % 3u) == 0u) {
+                f.data[0] = 0x5Au; /* bad CRC (almost surely) */
+            } else if ((k % 3u) == 1u) {
+                f.dlc = 7u; /* WRONG_LENGTH */
+            } else {
+                f.data[2] = (uint8_t)(k * 7u);
+            }
+            if (vbus_send(&bus_p, node_peer, &f) == CAN_PORT_OK) {
+                seen->hostile_sent++;
+            }
+        }
+    }
+    if ((now % 20u) == 5u) {
+        can_frame_t r;
+        (void)memset(&r, PLATFORM_UDS_PADDING_BYTE, sizeof r.data);
+        r.id = PLATFORM_UDS_PHYS_REQUEST_ID;
+        r.extended = false;
+        r.dlc = (uint8_t)PLATFORM_UDS_FRAME_DLC;
+        r.data[0] = 2u;
+        r.data[1] = UDS_SID_TESTER_PRESENT;
+        r.data[2] = 0x00u;
+        TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &r));
+        seen->uds_requests++;
+    }
+}
+
 /* RUN_MS passes of 1 ms. inject: the peer sends 0x023, 0x082 and 0x120 every 20 ms. */
 static seen_t run(bool inject)
 {
@@ -214,6 +260,9 @@ static seen_t run(bool inject)
                                                               PLATFORM_HEARTBEAT_SAFETY_LENGTH, &sh_peer_tx));
             TEST_ASSERT_EQUAL(CAN_PORT_OK, vbus_send(&bus_p, node_peer, &hb82));
         }
+        if (sh_hostile) {
+            hostile_burst(now, &seen);
+        }
         comms_pass(&client, &server, &republisher, &heartbeat, &ekf, &tx, sh_on ? &sh : NULL);
         seen.dtc_failed_passes += ((diag_dtc_status(PLATFORM_UDS_DTC_IDX_SAFETY_HEARTBEAT_LOST) & 0x01u) != 0u) ? 1u : 0u;
         can_frame_t got;
@@ -228,6 +277,8 @@ static seen_t run(bool inject)
                 note(&seen.hb, now, PLATFORM_HEARTBEAT_RT_CORE_E2E_DATA_ID,
                      PLATFORM_HEARTBEAT_RT_CORE_E2E_MAX_DELTA_COUNTER, PLATFORM_HEARTBEAT_RT_CORE_E2E_TIMEOUT_MS,
                      &got, PLATFORM_HEARTBEAT_RT_CORE_LENGTH);
+            } else if (got.id == PLATFORM_UDS_PHYS_RESPONSE_ID) {
+                seen.uds_answers += (got.data[0] == 2u) && (got.data[1] == (UDS_SID_TESTER_PRESENT + 0x40u)) ? 1u : 0u;
             } else if (got.id == PLATFORM_EKF_FRICTION_MASS_FRAME_ID) {
                 seen.friction_frames++;
             } else if (got.id == PLATFORM_SAFETY_REQUEST_FRAME_ID) {
@@ -342,11 +393,44 @@ static void test_the_0x082_monitor_sets_its_dtc_and_changes_nothing_rt_core_send
     sh_on = false;
 }
 
+/* A hostile 0x082 stream cannot change what rt-core sends, and the UDS server keeps answering. */
+static void test_a_hostile_0x082_stream_changes_nothing_and_uds_is_still_served(void)
+{
+    sh_on = false;
+    sh_hostile = false;
+    rig_up();
+    const seen_t base = run(false);
+
+    sh_on = true;
+    sh_peer_until_ms = 0u; /* no genuine 0x082: the hostile frames are all there is */
+    sh_hostile = true;
+    rig_up();
+    const seen_t hostile = run(false);
+    sh_hostile = false;
+    sh_on = false;
+
+    TEST_ASSERT_TRUE(hostile.hostile_sent > 32u);
+    TEST_ASSERT_TRUE(safety_hb_link(&sh).wrong_crc > 0u);
+    TEST_ASSERT_TRUE(safety_hb_link(&sh).wrong_length > 0u);
+    TEST_ASSERT_EQUAL_UINT32(base.hb.frames, hostile.hb.frames);
+    TEST_ASSERT_EQUAL_UINT32(base.lean.frames, hostile.lean.frames);
+    TEST_ASSERT_EQUAL_UINT32(base.hb.digest, hostile.hb.digest);
+    TEST_ASSERT_EQUAL_UINT32(base.lean.digest, hostile.lean.digest);
+    TEST_ASSERT_EQUAL_UINT32(0u, hostile.hb.e2e_bad);
+    TEST_ASSERT_EQUAL_UINT32(0u, hostile.lean.e2e_bad);
+    TEST_ASSERT_EQUAL_UINT32(0u, hostile.other_safety);
+    /* the stream is not a heartbeat: the DTC reports the silence, diagnostic only */
+    TEST_ASSERT_TRUE(hostile.dtc_failed_passes > 0u);
+    TEST_ASSERT_TRUE(hostile.uds_requests >= 90u);
+    TEST_ASSERT_EQUAL_UINT32(hostile.uds_requests, hostile.uds_answers);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_0x020_and_0x081_are_on_the_platform_bus_at_their_cycles_with_valid_e2e);
     RUN_TEST(test_the_0x082_monitor_sets_its_dtc_and_changes_nothing_rt_core_sends);
+    RUN_TEST(test_a_hostile_0x082_stream_changes_nothing_and_uds_is_still_served);
     RUN_TEST(test_injected_frames_are_filtered_and_rt_core_0x120_never_depends_on_them);
     return UNITY_END();
 }

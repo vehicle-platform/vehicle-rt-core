@@ -209,6 +209,20 @@ static void test_a_safety_mcu_that_never_boots_fails_the_dtc_after_the_start_up_
     TEST_ASSERT_TRUE(dtc_failed());
 }
 
+/* The boot between safety_hb_open() and the first comms pass may take long: the grace
+ * starts at the first pass, so the DTC does not latch before the safety MCU had its time. */
+static void test_a_long_gap_between_open_and_the_first_pass_does_not_latch_the_dtc(void)
+{
+    hal_time_host_advance(2000u); /* open was in setUp; the scheduler starts 2 s later */
+    pass();
+    const uint32_t first = timebase_now_ms() - 1u;
+    silence_to(first + TIMEOUT);
+    TEST_ASSERT_FALSE(dtc_failed());
+    TEST_ASSERT_EQUAL_UINT8(0u, diag_dtc_status(IDX));
+    silence_to(first + TIMEOUT + 1u);
+    TEST_ASSERT_TRUE(dtc_failed());
+}
+
 static void test_the_dtc_leaves_rt_core_s_own_heartbeat_alone(void)
 {
     run(10u * CYCLE, true, 0u);
@@ -256,6 +270,7 @@ int main(void)
     RUN_TEST(test_one_lost_frame_does_not_set_the_dtc);
     RUN_TEST(test_three_silent_cycles_set_the_dtc_and_a_frame_clears_the_test_result);
     RUN_TEST(test_a_safety_mcu_that_never_boots_fails_the_dtc_after_the_start_up_grace);
+    RUN_TEST(test_a_long_gap_between_open_and_the_first_pass_does_not_latch_the_dtc);
     RUN_TEST(test_the_dtc_leaves_rt_core_s_own_heartbeat_alone);
     RUN_TEST(test_a_wrong_dlc_is_a_link_error_not_a_heartbeat);
     return UNITY_END();

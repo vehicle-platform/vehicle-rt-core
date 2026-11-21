@@ -6,7 +6,8 @@
  * safety node's 0x082 HeartbeatSafety at its generated cycle with a valid E2E (core
  * vehicle_e2e_protect() and the generated DataID), so rt-core's 0x082 monitor
  * (features/safety_hb, D-118 item 6) sees a live peer. The payload is all zero: rt-core
- * never decodes it. Silence can be switched on to rehearse SAFETY_HEARTBEAT_LOST.
+ * never decodes it. In-process only: it takes a vbus_t and has no SocketCAN path (a CI
+ * grep keeps it that way), so it can never put a frame on a real or vcan interface. Silence can be switched on to rehearse SAFETY_HEARTBEAT_LOST.
  */
 
 #include "hal/host/vbus.h"
