@@ -1,0 +1,5 @@
+# gitleaks config (T24, QUALITY CI-2): default ruleset. The 2026-11-17 audit and the
+# 2026-11-21 full-history scan found no secrets, so no baseline is needed. Add
+# allowlist entries (with a reason) only for proven false positives, e.g. fake test tokens.
+[extend]
+useDefault = true
