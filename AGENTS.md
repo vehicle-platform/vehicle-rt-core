@@ -50,10 +50,11 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 ## 4. Workflow
 
 1. Branch: `ext/<tool>-<topic>` (e.g. `ext/gemini-mobile-dashboard`), in the repo you change. Never `main`, never a `claude/` branch. One topic per branch.
-2. Commits: Conventional Commits in English (`feat(mobile): ...`) with the trailer line `AI-Agent: <tool>/<model>` (e.g. `AI-Agent: gemini-cli/gemini-2.5-pro`). Claude finds your work with `git log --grep '^AI-Agent:'`.
-3. Before each commit: run the repo's checks (table below) and `python3 scripts/check_zones.py <repo>`. Red → revert those paths. Commit and push only when the user asks.
-4. PR (when the user asks): title in Conventional Commits form; description = summary, checks run with their result, the zone result, `needs-claude-review` if any path is yellow, and the log file name.
-5. Write code that reads like the surrounding code: same naming, comment density, test style. Add or update tests for what you change.
+2. Language: every artifact is English only, never bilingual (D-125): code, comments, docs, test results, fixtures, prompts, commits, PR texts. No Turkish text in the repos except the i18n translation resource files; user-facing text defaults to English.
+3. Commits: Conventional Commits in English (`feat(mobile): ...`) with the trailer line `AI-Agent: <tool>/<model>` (e.g. `AI-Agent: gemini-cli/gemini-2.5-pro`). Claude finds your work with `git log --grep '^AI-Agent:'`.
+4. Before each commit: run the repo's checks (table below) and `python3 scripts/check_zones.py <repo>`. Red → revert those paths. Commit and push only when the user asks.
+5. PR (when the user asks): title in Conventional Commits form; description = summary, checks run with their result, the zone result, `needs-claude-review` if any path is yellow, and the log file name.
+6. Write code that reads like the surrounding code: same naming, comment density, test style. Add or update tests for what you change.
 
 | Repo | Checks (run from the repo root) |
 |---|---|
@@ -77,7 +78,7 @@ Red-zone edits; signal, UDS, BLE and limit changes (`/signal-change`) and every 
 
 <!-- Source of truth: vehicle-workspace/PLATFORM-RULES.md. Copies in each repo's .claude/ are written by scripts/sync_claude.py — edit only the source. -->
 
-SDV-architecture diagnostics / telemetry / ADAS platform for motorcycles (first vehicle: Honda CL250). **Scope (D-078):** for now only a test prototype is built and tested on the CL250; the scale is widened into a commercial multi-vehicle product later, so keep vehicle facts in per-vehicle defs files and never delete a catalog DID because the CL250 does not serve it. Senior thesis → GitHub org `vehicle-platform` (12 platform repos + vehicle-workspace, **public** — D-033; never commit keys, real GPS/ride data or personal data). The user writes in Turkish. Reply in Turkish, but write every project artifact (code, comments, docs, commits) in English.
+SDV-architecture diagnostics / telemetry / ADAS platform for motorcycles (first vehicle: Honda CL250). **Scope (D-078):** for now only a test prototype is built and tested on the CL250; the scale is widened into a commercial multi-vehicle product later, so keep vehicle facts in per-vehicle defs files and never delete a catalog DID because the CL250 does not serve it. Senior thesis → GitHub org `vehicle-platform` (12 platform repos + vehicle-workspace, **public** — D-033; never commit keys, real GPS/ride data or personal data). The user writes in Turkish. Reply to the user in Turkish, but every project artifact is **English only, never bilingual** (D-125): code, comments, docs, READMEs, test results, fixtures, prompts, commit messages, PR texts and file names. No Turkish (or other non-English) text anywhere in the repos: no quotes with translations, no side-by-side tables. The only exception is the translation resource files of the user-facing i18n layer (D-125); user-facing text defaults to English.
 
 ### Where things are
 
@@ -122,7 +123,7 @@ SDV-architecture diagnostics / telemetry / ADAS platform for motorcycles (first 
 - `vehicle-defs` uses semver. Consumers pin the `external/vehicle-defs` submodule (relative URL) to a **tag**. The known-good combination is recorded in `vehicle-workspace/manifest.yaml`.
 - Releases (D-036): bump the build-file version (CMake `project(VERSION)`, `pyproject.toml`, `pubspec.yaml`) in a PR → merge after green CI → `gh release create vX.Y.Z -R vehicle-platform/<repo> --target main --title vX.Y.Z --generate-notes` → pin the tag in `manifest.yaml` (workspace PR). vehicle-defs also adds a `CHANGELOG.md` entry; docs-only changes need no tag.
 - Import paths (D-107): a relative import stays inside its module (at most one `../`); anything that crosses a module or layer uses the repo's absolute form: TypeScript `@/` (`@defs/` for the submodule), Python the package name, Dart `package:` everywhere in `lib/` (`always_use_package_imports`), C an include root (`-I src`), never `../`.
-- `docs/archive/` (Turkish originals, advisor documents) is not read by Claude (D-038).
+- `docs/archive/` (Turkish originals, advisor documents) is not read by Claude (D-038); it is the one legacy exception to D-125 until it is moved out of the public repos.
 - Skills: `/repo-bootstrap` (repo skeleton), `/signal-change` (signals), `/feature-module` (firmware feature), `/handoff` (end of session, workspace only).
 - Token budget is limited: delegate bulk mechanical work to `sonnet`/`haiku` subagents, use `Explore` for broad searches, one task per session.
 
