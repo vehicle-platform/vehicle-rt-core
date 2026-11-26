@@ -47,6 +47,13 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 - **Hardware facts need a source.** Part numbers, pinouts, dimensions and prices you could not verify are marked **CONFIRM**; never rank an open question's candidates (Q-xxx) as decided, and never move a safety input (M4 board, D-082) onto a QM or detachable board.
 - **No releases:** no tags, no version bumps, no submodule pin changes, no `manifest.yaml` edits (D-036). Never merge a PR and never push to `main`; the user merges.
 
+- **Evaluation sets are read-only.** Never tune thresholds, keywords, prompts or templates on an evaluation or held-out set, and never copy its items into a dev set, a fixture or a keyword table. Choose a cutoff on a separate split and say which. Ranking scores that are not comparable across queries (e.g. RRF) are not relevance cutoffs.
+- **Meaningful values come from vehicle-defs at run time.** Ranges, thresholds, units and signal metadata are read from the pinned defs package, never copied as numbers and never taken from an older defs version as a fallback.
+- **Proposals are marked as proposals.** Targets, recommendations, design choices and data models you introduce are written as **proposed**; only measured results (with the command that produced them) and cited facts (document + section) are stated plainly. Never pick a winner where the task says Claude decides.
+- **Handle the unhappy path, with a test each:** errors surfaced to the caller or the UI (never swallowed), missing or invalid inputs fail loudly (non-zero exit, 4xx), late async replies dropped, timeouts bounded, temporary files removed.
+- **Reuse before you write.** Use the repo's existing transport, locale loader, storage layer and helpers; a second copy of the same logic is a review finding.
+- **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers; label synthetic data `Provenance: synthetic`.
+
 ## 4. Workflow
 
 1. Branch: `ext/<tool>-<topic>` (e.g. `ext/gemini-mobile-dashboard`), in the repo you change. Never `main`, never a `claude/` branch. One topic per branch.
