@@ -16,6 +16,7 @@ function(vehicle_host_test name)
 endfunction()
 
 vehicle_host_test(test_isotp_core)
+vehicle_host_test(test_can_timing)
 vehicle_host_test(test_can_sm_core)
 vehicle_host_test(test_vbus vehicle_rtcore_hal_host)
 vehicle_host_test(test_timebase vehicle_rtcore_fw vehicle_rtcore_hal_host)

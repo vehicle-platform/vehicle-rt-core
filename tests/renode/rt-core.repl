@@ -1,0 +1,22 @@
+// Overrides on top of Renode's stock platforms/cpus/stm32h743.repl for the rt-core CubeMX image.
+using "platforms/cpus/stm32h743.repl"
+
+// Everything else (RCC, PWR VOS stub, IWDG1, FDCAN1/2 = Bosch M_CAN, GPIO, UARTs, SPI, TIM, DMA) is
+// used as shipped by Renode. See tests/renode/README.md.
+
+// The NUCLEO-H743ZI2 feeds HSE from the ST-LINK MCO (8 MHz, bypass). The stock RCC model reports
+// HSERDY/PLLRDY itself; the frequency is only needed for the derived clock reads.
+rcc:
+    hseFrequency: 8_000_000
+
+// DBGMCU is read by HAL_GetREVID(); the stock platform leaves it unmapped, which only logs warnings.
+// Read-only stub: DEV_ID 0x450 (STM32H742/743/753/750), REV_ID 0x1001 (rev Y).
+dbgmcu: Python.PythonPeripheral @ sysbus 0x5C001000
+    size: 0x1000
+    initable: false
+    script: '''
+if request.Offset == 0x00: # IDC
+    request.Value = 0x10010450
+else:
+    request.Value = 0
+'''

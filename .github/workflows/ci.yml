@@ -356,11 +356,69 @@ jobs:
           cmake --build --preset host-tsan
           ctest --preset host-tsan
 
+  # T67: boot test of the CubeMX image in Renode (no board needed). Renode and the Python
+  # packages are pinned; the tarball is verified against the SHA-256 GitHub publishes for the
+  # release asset. See tests/renode/README.md for what is covered and what is stubbed.
+  renode-boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RENODE_VERSION: "1.17.0"
+      RENODE_SHA256: "4ba7c68b59e2447f188ef4b4b112fcccd2802582c460beedceb63b84e5605a5f"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # Same toolchain source as the build-and-test job (Ubuntu's gcc-arm-none-eabi).
+      - name: Install toolchain
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi
+          arm-none-eabi-gcc --version | head -1
+
+      - name: Build the CubeMX image (Debug)
+        working-directory: cubemx
+        run: |
+          cmake --preset Debug
+          cmake --build --preset Debug
+
+      - name: Install Renode ${{ env.RENODE_VERSION }}
+        timeout-minutes: 5
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/renode.tar.gz" \
+            "https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode-${RENODE_VERSION}.linux-portable.tar.gz"
+          echo "${RENODE_SHA256}  $RUNNER_TEMP/renode.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/renode"
+          tar -xzf "$RUNNER_TEMP/renode.tar.gz" -C "$HOME/renode" --strip-components=1
+          python3 -m venv "$HOME/rvenv"
+          "$HOME/rvenv/bin/pip" install --quiet -r tests/renode/requirements.txt
+
+      - name: Renode boot test
+        run: |
+          mkdir -p "$RUNNER_TEMP/robot"
+          cd "$RUNNER_TEMP/robot"
+          PATH="$HOME/rvenv/bin:$PATH" "$HOME/renode/renode-test" "$GITHUB_WORKSPACE/tests/renode/boot.robot"
+
+      - name: Upload the Robot log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: renode-boot-rt-core
+          path: |
+            ${{ runner.temp }}/robot/log.html
+            ${{ runner.temp }}/robot/report.html
+            ${{ runner.temp }}/robot/robot_output.xml
+            ${{ runner.temp }}/robot/logs
+          if-no-files-found: warn
+          retention-days: 14
+
   # Aggregate required check (QUALITY CI-4): one stable name for the ruleset.
   # `skipped` counts as OK; `failure` and `cancelled` fail it.
   ci-ok:
     if: always()
-    needs: [build-and-test, complexity, thread-sanitizer]
+    needs: [build-and-test, complexity, thread-sanitizer, renode-boot]
     runs-on: ubuntu-latest
     steps:
       - name: Every needed job succeeded or was skipped

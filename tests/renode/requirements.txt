@@ -1,0 +1,6 @@
+# Python packages renode-test needs (Renode 1.17.0 pins robotframework 6.1 in its own tests/requirements.txt).
+robotframework==6.1
+robotframework-retryfailed==0.2.0
+psutil==7.2.2
+PyYAML==6.0.4
+telnetlib3==2.0.8
