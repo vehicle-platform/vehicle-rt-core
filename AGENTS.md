@@ -57,6 +57,11 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 - **Claims match the run.** A statement such as "X improves Y" needs the before/after numbers of the same run that show it; if the numbers do not show it, write it as a hypothesis.
 - **Run every CI step locally,** including test type-checks and build steps, not only the test command; read the repo's workflow files to see what CI runs.
 - **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers; label synthetic data `Provenance: synthetic`.
+- **Updating a doc never deletes still-true content.** Condense or move it; list every removed fact in the PR body with the reason (the code no longer does it, with the file). Copied paths, flags and rule sentences are checked against their source, never reworded into a different rule.
+- **Never discard what the user chose or typed.** A timeout, auto-close, retry or navigation keeps or submits the user's choice and text; it never drops it silently.
+- **Totals over the full data, each value once.** Counts are computed before a list is truncated; a quantity is not repeated as a raw field next to it; a missing input becomes a `warnings` entry, never a silent null; an unknown category is its own bucket.
+- **A scripted multi-step run stops at the first failed step** (conversation, retry chain, migration) and marks the rest as not run; cleanup in `finally` never masks the original error.
+- **Diagram and topology facts are checked per arrow** against the code or the DBC: who transmits on which bus, which services a node sends.
 
 ## 4. Workflow
 
