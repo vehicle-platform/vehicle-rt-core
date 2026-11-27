@@ -13,3 +13,5 @@ compile_commands.json
 *.p12
 *.jks
 *.keystore
+
+/cubemx/build/
