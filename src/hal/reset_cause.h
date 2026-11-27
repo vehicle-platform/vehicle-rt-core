@@ -17,6 +17,7 @@
  * RCC_RSR_*_Msk macros.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -94,6 +95,19 @@ typedef enum {
     RESET_FAULT_BUS = 3,
     RESET_FAULT_USAGE = 4
 } reset_fault_t;
+
+/*
+ * False when the RAM behind the fault record cannot be trusted after this reset: a power-on or
+ * brown-out reset (random contents), or a domain power-switch reset (D1/D2, the RAM was off).
+ * Reading it then must be skipped (it may also hold uninitialised ECC RAM).
+ */
+static inline bool reset_fault_record_trusted(uint32_t rsr)
+{
+    const uint32_t untrusted = RESET_CAUSE_RSR_PORRSTF | RESET_CAUSE_RSR_BORRSTF |
+                               RESET_CAUSE_RSR_D1RSTF | RESET_CAUSE_RSR_D2RSTF;
+
+    return (rsr & untrusted) == 0u;
+}
 
 static inline reset_fault_t reset_fault_decode(uint32_t kind, uint32_t check)
 {

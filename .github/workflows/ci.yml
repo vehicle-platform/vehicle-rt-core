@@ -416,6 +416,11 @@ jobs:
 
       # T77 item 3: the fault handlers must not push (a push onto an exhausted stack locks the
       # core up). Each starts with ldr (_estack), msr MSP and contains no push/stmdb/sp-store.
+      # F1: the fault record is an orphan .noinit section; the linker script is not edited, so
+      # its placement is asserted here (NOBITS, after _ebss, before the heap/stack region).
+      - name: .noinit placement (readelf)
+        run: python3 tools/check_noinit_layout.py cubemx/build/Debug/rt-core.elf cubemx/build/Release/rt-core.elf
+
       - name: Fault handlers are stack-free (objdump)
         run: python3 tools/check_fault_handlers.py --objdump arm-none-eabi-objdump cubemx/build/Debug/rt-core.elf cubemx/build/Release/rt-core.elf
 

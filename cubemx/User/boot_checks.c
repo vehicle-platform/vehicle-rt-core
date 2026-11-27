@@ -46,9 +46,10 @@ void boot_reset_cause_capture(void)
     RCC->RSR |= RCC_RSR_RMVF;
     RCC->RSR &= ~RCC_RSR_RMVF; /* RMVF is software set/clear on the H7, not self-clearing */
 
-    /* After a power-on reset the RAM is random (and uninitialised ECC RAM must not be read), so
-     * the fault record only counts after any other reset. It is written afresh every boot. */
-    if ((s_reset_rsr & RCC_RSR_PORRSTF) == 0u) {
+    /* After a power-on, brown-out or domain power-switch reset the RAM is random or was off (and
+     * uninitialised ECC RAM must not be read), so the fault record only counts after any other
+     * reset. It is written afresh every boot. */
+    if (reset_fault_record_trusted(s_reset_rsr)) {
         s_fault_kind = reset_fault_decode(boot_fault_record.kind, boot_fault_record.check);
         s_fault_cfsr = boot_fault_record.cfsr;
         s_fault_hfsr = boot_fault_record.hfsr;

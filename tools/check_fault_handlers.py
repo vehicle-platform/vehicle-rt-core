@@ -42,6 +42,33 @@ def check(objdump, elf):
                 errors.append(f"{elf}: {h}: stack/call instruction '{mnem} {ops}'")
             if mnem.startswith(("str", "vstr")) and re.search(r"\[sp[,\]]", ops):
                 errors.append(f"{elf}: {h}: store to the stack '{mnem} {ops}'")
+        errors += check_tail_and_stores(elf, h, ins)
+    return errors
+
+
+def check_tail_and_stores(elf, h, ins):
+    """The only exit is a branch to boot_fault_safe_state (after it only padding or the
+    generated self-loop), and every store goes through one base register (the record)."""
+    errors = []
+    idx = [i for i, (m, o) in enumerate(ins) if m.startswith("b") and "boot_fault_safe_state" in o]
+    if len(idx) != 1:
+        errors.append(f"{elf}: {h}: expected one branch to boot_fault_safe_state, found {len(idx)}")
+    else:
+        for m, o in ins[idx[0] + 1:]:
+            if not (m.startswith("nop") or (m.startswith("b") and "<" + h in o)):
+                errors.append(f"{elf}: {h}: instruction '{m} {o}' after the branch to boot_fault_safe_state")
+    bases = set()
+    stores = 0
+    for m, o in ins:
+        if m.startswith("str"):
+            mm = re.search(r"\[(r\d+)\s*(?:,\s*#(\d+))?\]", o)
+            if not mm:
+                errors.append(f"{elf}: {h}: unexpected store '{m} {o}'")
+                continue
+            stores += 1
+            bases.add(mm.group(1))
+    if len(bases) != 1 or stores != 4:
+        errors.append(f"{elf}: {h}: expected 4 stores through one base register, got {stores} through {sorted(bases)}")
     return errors
 
 

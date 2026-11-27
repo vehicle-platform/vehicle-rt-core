@@ -100,6 +100,20 @@ static void test_fault_record(void)
     TEST_ASSERT_EQUAL_INT(RESET_FAULT_NONE, reset_fault_decode(0u, RESET_CAUSE_FAULT_MAGIC));
 }
 
+static void test_fault_record_gate(void)
+{
+    TEST_ASSERT_TRUE(reset_fault_record_trusted(0u));
+    TEST_ASSERT_TRUE(reset_fault_record_trusted(PIN | CPU));
+    TEST_ASSERT_TRUE(reset_fault_record_trusted(RESET_CAUSE_RSR_SFTRSTF | PIN | CPU));
+    TEST_ASSERT_TRUE(reset_fault_record_trusted(RESET_CAUSE_RSR_IWDG1RSTF | PIN | CPU));
+    TEST_ASSERT_FALSE(reset_fault_record_trusted(RESET_CAUSE_RSR_PORRSTF));
+    TEST_ASSERT_FALSE(reset_fault_record_trusted(RESET_CAUSE_RSR_BORRSTF | PIN | CPU));
+    TEST_ASSERT_FALSE(reset_fault_record_trusted(D1));
+    TEST_ASSERT_FALSE(reset_fault_record_trusted(D2 | CPU));
+    /* A POR sets all of them. */
+    TEST_ASSERT_FALSE(reset_fault_record_trusted(RESET_CAUSE_RSR_PORRSTF | RESET_CAUSE_RSR_BORRSTF | PIN | CPU | D1 | D2));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -108,5 +122,6 @@ int main(void)
     RUN_TEST(test_unknown_and_ignored_bits);
     RUN_TEST(test_bit_positions_match_rm0433);
     RUN_TEST(test_fault_record);
+    RUN_TEST(test_fault_record_gate);
     return UNITY_END();
 }
