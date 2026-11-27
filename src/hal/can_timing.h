@@ -79,6 +79,32 @@ static inline bool can_timing_ok(uint32_t kernel_hz, uint32_t prescaler, uint32_
     return ok;
 }
 
+/* FDCAN_NBTP field layout (RM0433): NSJW [31:25], NBRP [24:16], NTSEG1 [15:8], NTSEG2 [6:0];
+ * every field holds the value minus one. */
+#define CAN_TIMING_NBTP_NSJW_POS 25u
+#define CAN_TIMING_NBTP_NSJW_MASK 0x7Fu
+#define CAN_TIMING_NBTP_NBRP_POS 16u
+#define CAN_TIMING_NBTP_NBRP_MASK 0x1FFu
+#define CAN_TIMING_NBTP_NTSEG1_POS 8u
+#define CAN_TIMING_NBTP_NTSEG1_MASK 0xFFu
+#define CAN_TIMING_NBTP_NTSEG2_POS 0u
+#define CAN_TIMING_NBTP_NTSEG2_MASK 0x7Fu
+
+/*
+ * can_timing_ok() on a raw FDCAN_NBTP read-back: decodes the four fields (+1) and checks them
+ * against the kernel clock read from the RCC at run time. This is the pre-start check of the
+ * boot code (cubemx/User/boot_checks.c); a wrong or unprogrammed register reads false.
+ */
+static inline bool can_timing_nbtp_ok(uint32_t kernel_hz, uint32_t nbtp, uint32_t expected_bps)
+{
+    const uint32_t sjw = ((nbtp >> CAN_TIMING_NBTP_NSJW_POS) & CAN_TIMING_NBTP_NSJW_MASK) + 1u;
+    const uint32_t prescaler = ((nbtp >> CAN_TIMING_NBTP_NBRP_POS) & CAN_TIMING_NBTP_NBRP_MASK) + 1u;
+    const uint32_t seg1 = ((nbtp >> CAN_TIMING_NBTP_NTSEG1_POS) & CAN_TIMING_NBTP_NTSEG1_MASK) + 1u;
+    const uint32_t seg2 = ((nbtp >> CAN_TIMING_NBTP_NTSEG2_POS) & CAN_TIMING_NBTP_NTSEG2_MASK) + 1u;
+
+    return can_timing_ok(kernel_hz, prescaler, seg1, seg2, sjw, expected_bps);
+}
+
 #ifdef __cplusplus
 }
 #endif

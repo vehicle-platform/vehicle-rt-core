@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "boot_checks.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -118,7 +118,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+  /* First thing in main: read and clear RCC->RSR (before MPU/HAL/clock init can reset or mask it). */
+  boot_reset_cause_capture();
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -162,7 +163,20 @@ int main(void)
   MX_USART3_UART_Init();
   MX_IWDG1_Init();
   /* USER CODE BEGIN 2 */
-
+#if defined(RTCORE_BOOT_START_FDCAN)
+  /* TODO(T13): the FDCAN port starts the controllers here. Off in this image (no frame is
+   * exchanged, and Renode's M_CAN model does not store NBTP, so the read-back would fail).
+   * boot_fdcan_start() checks the run-time kernel clock and the NBTP read-back with
+   * can_timing_nbtp_ok() and goes to the safe state instead of starting on a mismatch. */
+  if (boot_fdcan_start(&hfdcan1, BOOT_FDCAN1_EXPECTED_BPS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (boot_fdcan_start(&hfdcan2, BOOT_FDCAN2_EXPECTED_BPS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+#endif
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -1076,11 +1090,7 @@ void Error_Handler(void)
    * The GPIOD clock is forced on so the BSRR write never faults; before MX_GPIO_Init the
    * pins are still in analog mode, so the write only preloads ODR and the lines rely on the
    * external pull-ups (h743-pin-plan hardware item). */
-  __disable_irq();
-  RCC->AHB4ENR |= RCC_AHB4ENR_GPIODEN;
-  (void)RCC->AHB4ENR;
-  GPIOD->BSRR = (uint32_t)(CS_EGT_Pin | CS_ADXL_ARM_Pin | CS_ADXL_ENG_Pin);
-  NVIC_SystemReset();
+  boot_safe_state(); /* always_inline, stack-free, never returns (User/boot_checks.h) */
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
