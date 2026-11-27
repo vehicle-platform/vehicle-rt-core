@@ -7,11 +7,14 @@
  * cubemx/User/boot_checks.c (it reads RCC->RSR before anything else clears it); this header only
  * turns the captured value into one cause.
  *
- * Several flags are set at once on most resets (every reset also drives the NRST pin flag, a
- * power-on reset also sets the BOR flag), so the decode is a fixed priority, most specific
- * first: IWDG, WWDG, CPU lockup/reset, low power, software, POR, BOR, pin. A value with none of
- * the known flags (including 0) is RESET_CAUSE_UNKNOWN. The bit positions are the RM0433
- * RCC_RSR positions; the cubemx build asserts them against the CMSIS RCC_RSR_*_Msk macros.
+ * Per the RM0433 reset-source table, several flags are set at once: CPURSTF is set by every
+ * system reset, PINRSTF by every reset that pulls NRST (all but a domain standby exit), BORRSTF
+ * by a power-on reset, and D1RSTF/D2RSTF also by a power-on reset. So the decode is a fixed
+ * priority, most specific source first: IWDG, WWDG, low-power violation, software, POR, BOR,
+ * pin, then a domain-only standby exit (D1/D2 without a system reset source), then a bare CPU
+ * reset. A value with none of the known flags (including 0) is RESET_CAUSE_UNKNOWN. The bit
+ * positions are the RM0433 RCC_RSR positions; the cubemx build asserts them against the CMSIS
+ * RCC_RSR_*_Msk macros.
  */
 
 #include <stdint.h>
@@ -22,7 +25,7 @@ extern "C" {
 
 /* RCC_RSR flag bits (RM0433). */
 #define RESET_CAUSE_RSR_RMVF 0x00010000u     /* write 1: clear all flags */
-#define RESET_CAUSE_RSR_CPURSTF 0x00020000u  /* CPU reset (lockup) */
+#define RESET_CAUSE_RSR_CPURSTF 0x00020000u  /* CPU reset (set by every system reset) */
 #define RESET_CAUSE_RSR_D1RSTF 0x00080000u   /* D1 domain power switch reset */
 #define RESET_CAUSE_RSR_D2RSTF 0x00100000u   /* D2 domain power switch reset */
 #define RESET_CAUSE_RSR_BORRSTF 0x00200000u  /* brown-out reset */
@@ -37,12 +40,13 @@ typedef enum {
     RESET_CAUSE_UNKNOWN = 0,
     RESET_CAUSE_IWDG,
     RESET_CAUSE_WWDG,
-    RESET_CAUSE_LOCKUP,
     RESET_CAUSE_LOW_POWER,
     RESET_CAUSE_SOFTWARE,
     RESET_CAUSE_POWER_ON,
     RESET_CAUSE_BROWN_OUT,
-    RESET_CAUSE_PIN
+    RESET_CAUSE_PIN,
+    RESET_CAUSE_DOMAIN_STANDBY,
+    RESET_CAUSE_CPU_RESET
 } reset_cause_t;
 
 /* Decode an RCC_RSR value (the RMVF bit itself is ignored). */
@@ -55,10 +59,7 @@ static inline reset_cause_t reset_cause_decode(uint32_t rsr)
         cause = RESET_CAUSE_IWDG;
     } else if ((flags & RESET_CAUSE_RSR_WWDG1RSTF) != 0u) {
         cause = RESET_CAUSE_WWDG;
-    } else if ((flags & RESET_CAUSE_RSR_CPURSTF) != 0u) {
-        cause = RESET_CAUSE_LOCKUP;
-    } else if ((flags & (RESET_CAUSE_RSR_LPWRRSTF | RESET_CAUSE_RSR_D1RSTF |
-                       RESET_CAUSE_RSR_D2RSTF)) != 0u) {
+    } else if ((flags & RESET_CAUSE_RSR_LPWRRSTF) != 0u) {
         cause = RESET_CAUSE_LOW_POWER;
     } else if ((flags & RESET_CAUSE_RSR_SFTRSTF) != 0u) {
         cause = RESET_CAUSE_SOFTWARE;
@@ -68,10 +69,40 @@ static inline reset_cause_t reset_cause_decode(uint32_t rsr)
         cause = RESET_CAUSE_BROWN_OUT;
     } else if ((flags & RESET_CAUSE_RSR_PINRSTF) != 0u) {
         cause = RESET_CAUSE_PIN;
+    } else if ((flags & (RESET_CAUSE_RSR_D1RSTF | RESET_CAUSE_RSR_D2RSTF)) != 0u) {
+        cause = RESET_CAUSE_DOMAIN_STANDBY;
+    } else if ((flags & RESET_CAUSE_RSR_CPURSTF) != 0u) {
+        cause = RESET_CAUSE_CPU_RESET;
     } else {
         /* no known flag: stays UNKNOWN */
     }
     return cause;
+}
+
+/*
+ * Fault record kept across the fault-handler reset (cubemx/User/boot_checks.c, a .noinit
+ * struct written stack-free by the naked fault entry): word 0 is the fault kind, word 3 is
+ * kind XOR RESET_CAUSE_FAULT_MAGIC. A record whose check word does not match, or whose kind is
+ * out of range, is not a fault (random RAM after power-up, a reset from Error_Handler).
+ */
+#define RESET_CAUSE_FAULT_MAGIC 0xFA17C0DEu
+
+typedef enum {
+    RESET_FAULT_NONE = 0,
+    RESET_FAULT_HARD = 1,
+    RESET_FAULT_MEMMANAGE = 2,
+    RESET_FAULT_BUS = 3,
+    RESET_FAULT_USAGE = 4
+} reset_fault_t;
+
+static inline reset_fault_t reset_fault_decode(uint32_t kind, uint32_t check)
+{
+    reset_fault_t fault = RESET_FAULT_NONE;
+
+    if (((kind ^ RESET_CAUSE_FAULT_MAGIC) == check) && (kind >= 1u) && (kind <= 4u)) {
+        fault = (reset_fault_t)kind;
+    }
+    return fault;
 }
 
 #ifdef __cplusplus

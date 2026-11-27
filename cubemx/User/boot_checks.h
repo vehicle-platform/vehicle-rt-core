@@ -44,17 +44,44 @@ static inline __attribute__((always_inline, noreturn)) void boot_safe_state(void
 }
 
 /*
- * Entry of HardFault, MemManage, BusFault and UsageFault: a naked handler (no prologue, so no
- * push) that loads MSP with the top of the stack region (_estack, the linker symbol) and
- * branches to boot_fault_safe_state(). The handler runs on MSP; if the fault was MSP
- * exhaustion (an ISR chain that overran the stack) the old MSP is not trusted, and the
- * fault is never resumed, so restarting the stack at the top is safe. Use only as the whole
- * body of a function declared __attribute__((naked)).
+ * Fault record, kept across the reset in a .noinit struct (outside .bss, so the startup code
+ * does not clear it). Word 0 = fault kind (reset_fault_t value 1..4), 1 = CFSR, 2 = HFSR,
+ * 3 = kind XOR RESET_CAUSE_FAULT_MAGIC. Written by BOOT_FAULT_ENTRY() with registers only.
  */
-#define BOOT_FAULT_ENTRY()                  \
-    __asm volatile("ldr r0, =_estack\n"     \
-                   "msr msp, r0\n"          \
-                   "isb\n"                  \
+typedef struct {
+    uint32_t kind;
+    uint32_t cfsr;
+    uint32_t hfsr;
+    uint32_t check;
+} boot_fault_record_t;
+
+extern boot_fault_record_t boot_fault_record;
+
+/*
+ * Entry of HardFault, MemManage, BusFault and UsageFault: a naked handler (no prologue, so no
+ * push) that loads MSP with the top of the stack region (_estack, the linker symbol), saves the
+ * fault kind (tag 1..4), CFSR and HFSR into boot_fault_record with registers only, and branches
+ * to boot_fault_safe_state(). The handler runs on MSP; if the fault was MSP exhaustion (an ISR
+ * chain that overran the stack) the old MSP is not trusted, and the fault is never resumed, so
+ * restarting the stack at the top is safe. Use only as the whole body of a function declared
+ * __attribute__((naked)). The next boot reads the record with boot_fault_kind().
+ */
+#define BOOT_FAULT_ENTRY(tag)                                  \
+    __asm volatile("ldr r0, =_estack\n"                        \
+                   "msr msp, r0\n"                             \
+                   "isb\n"                                     \
+                   "ldr r1, =boot_fault_record\n"              \
+                   "ldr r2, =0xE000ED28\n" /* SCB->CFSR */     \
+                   "ldr r3, [r2]\n"                            \
+                   "str r3, [r1, #4]\n"                        \
+                   "ldr r3, [r2, #4]\n" /* SCB->HFSR */        \
+                   "str r3, [r1, #8]\n"                        \
+                   "movs r3, #" #tag "\n"                      \
+                   "str r3, [r1, #0]\n"                        \
+                   "ldr r2, =0xFA17C0DE\n"                     \
+                   "eors r3, r3, r2\n"                         \
+                   "str r3, [r1, #12]\n"                       \
+                   "dsb\n"                                     \
                    "b boot_fault_safe_state\n")
 
 /* Target of BOOT_FAULT_ENTRY(); a function (not inline) because the asm branches to it by name. */
@@ -70,6 +97,16 @@ void boot_fault_safe_state(void) __attribute__((noreturn, used));
 void boot_reset_cause_capture(void);
 uint32_t boot_reset_cause_raw(void);
 reset_cause_t boot_reset_cause(void);
+
+/*
+ * Whether the reset that led to this boot came from a fault handler (not Error_Handler, not a
+ * watchdog): the kind, CFSR and HFSR saved by BOOT_FAULT_ENTRY(). Valid after
+ * boot_reset_cause_capture(); RESET_FAULT_NONE after a power-on reset, whose RAM is random. The
+ * record is cleared at capture, so it reports the previous reset only.
+ */
+reset_fault_t boot_fault_kind(void);
+uint32_t boot_fault_cfsr(void);
+uint32_t boot_fault_hfsr(void);
 
 /*
  * FDCAN nominal bit-timing check before HAL_FDCAN_Start: the kernel clock is read from the RCC

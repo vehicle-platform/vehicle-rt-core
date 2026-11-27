@@ -296,7 +296,7 @@ jobs:
           for id in 10.8 15.6 17.7; do
             echo "$out" | grep -qx "misra-c2012-$id" || { echo "::error::the MISRA addon did not report $id on misra/canary.c"; exit 1; }
           done
-          if grep -rn 'cppcheck-suppress' src | grep -v 'DEV-[0-9]'; then
+          if grep -rn 'cppcheck-suppress' src cubemx/User | grep -v 'DEV-[0-9]'; then
             echo "::error::inline cppcheck suppressions must name a deviation (DEV-xxx) from misra/README.md"
             exit 1
           fi
@@ -304,6 +304,20 @@ jobs:
             --error-exitcode=1 --suppressions-list=misra/suppressions.txt \
             --suppress=missingIncludeSystem '--suppress=*:*external/*' -i src/hal/host -i src/app/host \
             -I src -I external/vehicle-defs/gen/c/rt_core src
+          # The non-generated CubeMX-side code (T77). The generated HAL/CMSIS/FreeRTOS headers
+          # are only parsed (findings inside them are not ours).
+          F=cubemx/Middlewares/Third_Party/FreeRTOS/Source
+          cppcheck --std=c11 --enable=style --addon=misra --inline-suppr \
+            --error-exitcode=1 --suppressions-list=misra/suppressions.txt \
+            --suppress=missingIncludeSystem --suppress=unusedFunction \
+            '--suppress=*:*external/*' '--suppress=*:*cubemx/Drivers/*' '--suppress=*:*cubemx/Inc/*' \
+            '--suppress=*:*cubemx/Middlewares/*' \
+            -DSTM32H743xx -DUSE_HAL_DRIVER \
+            -I src -I external/vehicle-defs/gen/c/rt_core -I cubemx/User -I cubemx/Inc \
+            -I cubemx/Drivers/STM32H7xx_HAL_Driver/Inc -I cubemx/Drivers/CMSIS/Device/ST/STM32H7xx/Include \
+            -I cubemx/Drivers/CMSIS/Include -I cubemx/Drivers/CMSIS/RTOS2/Include \
+            -I $F/include -I $F/CMSIS_RTOS_V2 -I $F/portable/GCC/ARM_CM4F \
+            cubemx/User
 
   # FW-2 / T27: complexity and size ratchet (CCN <= 15, function <= 100 lines, file <= 600
   # lines). Existing offenders sit in tools/lizard_baseline.txt; new code must comply and the
@@ -388,8 +402,22 @@ jobs:
       # T77 / invariant 5: the linked image must contain no malloc/free/_sbrk (the generated
       # sysmem.c is replaced by an always-failing _sbrk). The FreeRTOS heap_4 residual is
       # reported, not failed, until T13 (cubemx/README.md, Open).
-      - name: No heap in the CubeMX image (nm)
-        run: python3 tools/check_image_heap.py --nm arm-none-eabi-nm cubemx/build/Debug/rt-core.elf
+      - name: No heap in the CubeMX image (nm, Debug and Release)
+        run: |
+          # Canary: the gate must fail on an image that really uses malloc.
+          printf '#include <stdlib.h>\nint main(void){void *p = malloc(8); free(p); return 0;}\n' > "$RUNNER_TEMP/canary.c"
+          arm-none-eabi-gcc -mcpu=cortex-m7 --specs=nosys.specs "$RUNNER_TEMP/canary.c" -o "$RUNNER_TEMP/canary.elf" 2>/dev/null
+          if python3 tools/check_image_heap.py --nm arm-none-eabi-nm "$RUNNER_TEMP/canary.elf" 2>/dev/null; then
+            echo "::error::the heap gate did not fail on the malloc canary"; exit 1
+          fi
+          python3 tools/check_image_heap.py --nm arm-none-eabi-nm cubemx/build/Debug/rt-core.elf
+          (cd cubemx && cmake --preset Release && cmake --build --preset Release)
+          python3 tools/check_image_heap.py --nm arm-none-eabi-nm cubemx/build/Release/rt-core.elf
+
+      # T77 item 3: the fault handlers must not push (a push onto an exhausted stack locks the
+      # core up). Each starts with ldr (_estack), msr MSP and contains no push/stmdb/sp-store.
+      - name: Fault handlers are stack-free (objdump)
+        run: python3 tools/check_fault_handlers.py --objdump arm-none-eabi-objdump cubemx/build/Debug/rt-core.elf cubemx/build/Release/rt-core.elf
 
       - name: Install Renode ${{ env.RENODE_VERSION }}
         timeout-minutes: 5

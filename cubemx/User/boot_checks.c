@@ -24,7 +24,14 @@ _Static_assert((CAN_TIMING_NBTP_NBRP_MASK << CAN_TIMING_NBTP_NBRP_POS) == FDCAN_
 _Static_assert((CAN_TIMING_NBTP_NTSEG1_MASK << CAN_TIMING_NBTP_NTSEG1_POS) == FDCAN_NBTP_NTSEG1_Msk, "NTSEG1 mask");
 _Static_assert((CAN_TIMING_NBTP_NTSEG2_MASK << CAN_TIMING_NBTP_NTSEG2_POS) == FDCAN_NBTP_NTSEG2_Msk, "NTSEG2 mask");
 
+/* .noinit orphan section (NOBITS): placed after .bss by the linker, outside the startup clear.
+ * The trailing '@' makes the assembler read the rest of the section directive as a comment. */
+boot_fault_record_t boot_fault_record __attribute__((section(".noinit,\"aw\",%nobits @")));
+
 static uint32_t s_reset_rsr;
+static reset_fault_t s_fault_kind = RESET_FAULT_NONE;
+static uint32_t s_fault_cfsr;
+static uint32_t s_fault_hfsr;
 static reset_cause_t s_reset_cause = RESET_CAUSE_UNKNOWN;
 
 void boot_fault_safe_state(void)
@@ -37,6 +44,34 @@ void boot_reset_cause_capture(void)
     s_reset_rsr = RCC->RSR;
     s_reset_cause = reset_cause_decode(s_reset_rsr);
     RCC->RSR |= RCC_RSR_RMVF;
+    RCC->RSR &= ~RCC_RSR_RMVF; /* RMVF is software set/clear on the H7, not self-clearing */
+
+    /* After a power-on reset the RAM is random (and uninitialised ECC RAM must not be read), so
+     * the fault record only counts after any other reset. It is written afresh every boot. */
+    if ((s_reset_rsr & RCC_RSR_PORRSTF) == 0u) {
+        s_fault_kind = reset_fault_decode(boot_fault_record.kind, boot_fault_record.check);
+        s_fault_cfsr = boot_fault_record.cfsr;
+        s_fault_hfsr = boot_fault_record.hfsr;
+    }
+    boot_fault_record.kind = 0u;
+    boot_fault_record.cfsr = 0u;
+    boot_fault_record.hfsr = 0u;
+    boot_fault_record.check = 0u;
+}
+
+reset_fault_t boot_fault_kind(void)
+{
+    return s_fault_kind;
+}
+
+uint32_t boot_fault_cfsr(void)
+{
+    return s_fault_cfsr;
+}
+
+uint32_t boot_fault_hfsr(void)
+{
+    return s_fault_hfsr;
 }
 
 uint32_t boot_reset_cause_raw(void)

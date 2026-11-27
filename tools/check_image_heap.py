@@ -21,7 +21,8 @@ import sys
 
 FORBIDDEN = re.compile(
     r"^(malloc|free|calloc|realloc|reallocf|memalign|aligned_alloc|posix_memalign|valloc|pvalloc"
-    r"|_malloc_r|_free_r|_calloc_r|_realloc_r|_memalign_r|_mallinfo_r|_malloc_trim_r"
+    r"|mallinfo|mallopt|malloc_usable_size|malloc_trim|malloc_stats|_malloc_r|_free_r|_calloc_r|_realloc_r|_reallocf_r"
+    r"|_memalign_r|_mallinfo_r|_malloc_trim_r|_valloc_r|_pvalloc_r|_mallopt_r|_malloc_usable_size_r|_Znwj|_Znaj|_ZdlPv|_ZdaPv|_ZdlPvj|_ZdaPvj"
     r"|_sbrk|_sbrk_r|sbrk|__sbrk_heap_end|__malloc_[A-Za-z_]+|_malloc_[A-Za-z_]+)$"
 )
 FREERTOS_HEAP = re.compile(r"^(pvPortMalloc|vPortFree|xPortGetFreeHeapSize|xPortGetMinimumEverFreeHeapSize)$")
