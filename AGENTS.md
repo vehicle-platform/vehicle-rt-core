@@ -52,6 +52,10 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 - **Proposals are marked as proposals.** Targets, recommendations, design choices and data models you introduce are written as **proposed**; only measured results (with the command that produced them) and cited facts (document + section) are stated plainly. Never pick a winner where the task says Claude decides.
 - **Handle the unhappy path, with a test each:** errors surfaced to the caller or the UI (never swallowed), missing or invalid inputs fail loudly (non-zero exit, 4xx), late async replies dropped, timeouts bounded, temporary files removed.
 - **Reuse before you write.** Use the repo's existing transport, locale loader, storage layer and helpers; a second copy of the same logic is a review finding.
+- **Concurrency and retries are part of the job.** A read-modify-write of shared state (a queue, a file, a row) runs under one lock or one atomic statement; a create that a client may retry is idempotent through a key or a database constraint, never a SELECT-then-INSERT; a retry has a backoff and a cancel. Test the concurrent case.
+- **Evaluation splits are frozen once used.** Never move, relabel or reword an existing evaluation item between tune, test and holdout; a new split takes only new items. A cutoff chosen on one split is never reported on that split.
+- **Claims match the run.** A statement such as "X improves Y" needs the before/after numbers of the same run that show it; if the numbers do not show it, write it as a hypothesis.
+- **Run every CI step locally,** including test type-checks and build steps, not only the test command; read the repo's workflow files to see what CI runs.
 - **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers; label synthetic data `Provenance: synthetic`.
 
 ## 4. Workflow
