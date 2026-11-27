@@ -14,6 +14,6 @@ permissions:
 jobs:
   precheck:
     if: startsWith(github.head_ref || github.ref_name, 'ext/')
-    uses: vehicle-platform/vehicle-workspace/.github/workflows/ext-precheck.yml@main
+    uses: vehicle-platform/vehicle-workspace/.github/workflows/ext-precheck.yml@5bc819cfb4f809057320dd2b506c1d00c7be360d # main 2026-11-28
     with:
       repo: vehicle-rt-core
