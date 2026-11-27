@@ -117,6 +117,36 @@ static void test_sample_point_window(void)
     TEST_ASSERT_FALSE(can_timing_ok(KERNEL_HZ, 8u, 18u, 1u, 1u, VEHICLE_CL250_BITRATE));
 }
 
+static void test_nbtp_readback_of_the_image(void)
+{
+    /* NSJW 1, NBRP 9, NTSEG1 12, NTSEG2 1 (the HAL values minus one): the value the image programs. */
+    const uint32_t nbtp = (1u << 25) | (9u << 16) | (12u << 8) | 1u;
+
+    TEST_ASSERT_EQUAL_HEX32(0x02090C01u, nbtp);
+    TEST_ASSERT_TRUE(can_timing_nbtp_ok(KERNEL_HZ, nbtp, VEHICLE_CL250_BITRATE));
+    /* A run-time kernel clock that differs from the .ioc value is refused. */
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ / 2u, nbtp, VEHICLE_CL250_BITRATE));
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(0u, nbtp, VEHICLE_CL250_BITRATE));
+    /* One field off by one is refused (prescaler 11, seg1 12, seg2 3, SJW 3). */
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, nbtp + (1u << 16), VEHICLE_CL250_BITRATE));
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, nbtp - (1u << 8), VEHICLE_CL250_BITRATE));
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, nbtp + 1u, VEHICLE_CL250_BITRATE));
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, nbtp + (1u << 25), VEHICLE_CL250_BITRATE));
+    /* The expected rate is the other input. */
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, nbtp, 250000u));
+}
+
+static void test_nbtp_reset_value_is_rejected(void)
+{
+    /* FDCAN_NBTP reset value 0x06000A03 (NBRP 0, NTSEG1 10, NTSEG2 3, NSJW 3): 5 Mbit/s. */
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, 0x06000A03u, VEHICLE_CL250_BITRATE));
+    /* An all-zero and an all-ones read (peripheral clock off, bus error) are rejected too. */
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, 0u, VEHICLE_CL250_BITRATE));
+    TEST_ASSERT_FALSE(can_timing_nbtp_ok(KERNEL_HZ, 0xFFFFFFFFu, VEHICLE_CL250_BITRATE));
+    /* Reserved bit 7 does not change the decode. */
+    TEST_ASSERT_TRUE(can_timing_nbtp_ok(KERNEL_HZ, 0x02090C01u | 0x80u, VEHICLE_CL250_BITRATE));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -129,5 +159,7 @@ int main(void)
     RUN_TEST(test_out_of_range_values_cannot_wrap_into_a_match);
     RUN_TEST(test_sjw_rule);
     RUN_TEST(test_sample_point_window);
+    RUN_TEST(test_nbtp_readback_of_the_image);
+    RUN_TEST(test_nbtp_reset_value_is_rejected);
     return UNITY_END();
 }
