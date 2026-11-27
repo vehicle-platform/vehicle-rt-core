@@ -384,6 +384,12 @@ jobs:
           cmake --preset Debug
           cmake --build --preset Debug
 
+      # T77 / invariant 5: the linked image must contain no malloc/free/_sbrk (the generated
+      # sysmem.c is replaced by an always-failing _sbrk). The FreeRTOS heap_4 residual is
+      # reported, not failed, until T13 (cubemx/README.md, Open).
+      - name: No heap in the CubeMX image (nm)
+        run: python3 tools/check_image_heap.py --nm arm-none-eabi-nm cubemx/build/Debug/rt-core.elf
+
       - name: Install Renode ${{ env.RENODE_VERSION }}
         timeout-minutes: 5
         run: |
