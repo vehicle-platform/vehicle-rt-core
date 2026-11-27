@@ -55,8 +55,16 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 - **Concurrency and retries are part of the job.** A read-modify-write of shared state (a queue, a file, a row) runs under one lock or one atomic statement; a create that a client may retry is idempotent through a key or a database constraint, never a SELECT-then-INSERT; a retry has a backoff and a cancel. Test the concurrent case.
 - **Evaluation splits are frozen once used.** Never move, relabel or reword an existing evaluation item between tune, test and holdout; a new split takes only new items. A cutoff chosen on one split is never reported on that split.
 - **Claims match the run.** A statement such as "X improves Y" needs the before/after numbers of the same run that show it; if the numbers do not show it, write it as a hypothesis.
+- **Totals reconcile.** Counts and totals are computed over the full data, never over a truncated list; a per-category breakdown adds up to the total it explains (anything it does not cover is its own neutral bucket); a missing input gives a `warnings` entry, never a silent empty result.
+- **Untrusted text stays quoted on every path.** Rider-written or other free text (notes, complaints) is shown only as quoted, sanitised text (control and Unicode format characters removed, the quote character replaced) and never reaches an LLM prompt. Trace the value past the render: storage, conversation history and recent-turn context, caches, exports.
+- **Examples in docs must work.** An example scenario, config or command must be able to produce the result it claims with the numbers it quotes (durations against sustain times, preconditions such as engine running); identifiers in examples exist in vehicle-defs or the code; "observed" only for something measured, with its source, otherwise "expected".
 - **Run every CI step locally,** including test type-checks and build steps, not only the test command; read the repo's workflow files to see what CI runs.
 - **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers; label synthetic data `Provenance: synthetic`.
+- **Updating a doc never deletes still-true content.** Condense or move it; list every removed fact in the PR body with the reason (the code no longer does it, with the file). Copied paths, flags and rule sentences are checked against their source, never reworded into a different rule.
+- **Never discard what the user chose or typed.** A timeout, auto-close, retry or navigation keeps or submits the user's choice and text; it never drops it silently.
+- **Totals over the full data, each value once.** Counts are computed before a list is truncated; a quantity is not repeated as a raw field next to it; a missing input becomes a `warnings` entry, never a silent null; an unknown category is its own bucket.
+- **A scripted multi-step run stops at the first failed step** (conversation, retry chain, migration) and marks the rest as not run; cleanup in `finally` never masks the original error.
+- **Diagram and topology facts are checked per arrow** against the code or the DBC: who transmits on which bus, which services a node sends.
 
 ## 4. Workflow
 
