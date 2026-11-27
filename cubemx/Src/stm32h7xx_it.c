@@ -73,12 +73,13 @@ extern TIM_HandleTypeDef htim6;
 void NMI_Handler(void)
 {
   /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
+  /* HSE CSS: clears the flag and calls HAL_RCC_CSSCallback, which ends in Error_Handler. */
+  HAL_RCC_NMI_IRQHandler();
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-   while (1)
-  {
-  }
+  /* Any other NMI source (or a CSS callback that returned): safe state and reset, never a
+   * spin, which could hang with no watchdog before MX_IWDG1_Init. */
+  Error_Handler();
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
 

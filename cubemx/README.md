@@ -47,32 +47,55 @@ Loading the `.ioc` logs CubeMX messages that cannot be removed: one `Pin<N> (VP_
 | SDMMC1 kernel clock | PLL1Q = 80 MHz |
 | ADC kernel clock | PLL2P = 100 MHz (PLL2: M = 4, N = 100, P = 2) |
 
-The FDCAN bit timing, SDMMC divider and every other peripheral parameter are at the CubeMX defaults. DMA stream and request allocation (ADC1, ADC3, TIM3_CH1 on DMA1 streams 0 to 2) is a proposal; the plan says to verify it in CubeMX. The CubeMX board support package (BSP COMMON) is removed from the project because it reserves USART3, which the plan uses for the ST-LINK virtual COM port.
+DMA stream and request allocation (ADC1, ADC3, TIM3_CH1 on DMA1 streams 0 to 2) is a proposal; the plan says to verify it in CubeMX. The CubeMX board support package (BSP COMMON) is removed from the project because it reserves USART3, which the plan uses for the ST-LINK virtual COM port.
+
+## Peripheral settings (T6b, set 2026-11-27, PROVISIONAL under D-134 item 3)
+
+Fixed design choices, to be revisited with measurements on the bench.
+
+| Item | Setting |
+|---|---|
+| FDCAN1 / FDCAN2 nominal timing | 80 MHz kernel clock, prescaler 10, seg1 13, seg2 2, SJW 2: 16 tq per bit, 500 kbit/s, sample point 14/16 = 87.5 % (CiA 301). Classic CAN, no BRS (`Src/main.c:449-457`, `:502-510`). `FDCAN_CalculateBaudRateNominal=500000` in the `.ioc`. The data-phase fields stay at the CubeMX defaults (unused). |
+| FDCAN1 (vehicle bus) mode | `FDCAN_MODE_BUS_MONITORING` (`Src/main.c:450`): never drives the bus, not even the ACK (invariants 1 and D-037). Switching it to normal mode is a T13/T26 step, taken only after a listen-only capture shows 0 error frames. |
+| FDCAN2 (platform bus) mode | `FDCAN_MODE_NORMAL` (`Src/main.c:503`). |
+| FDCAN message RAM (2560 words, shared) | FDCAN1 at word offset 0: 28 standard filters (28 words) + RX FIFO0 64 x 8-byte elements (4 words each, 256 words) = 284 words, 0 to 283. FDCAN2 at offset 1280 (half of the RAM): 28 filters + RX FIFO0 32 elements (128 words) + TX FIFO 16 elements (64 words) = 220 words, 1280 to 1499. The areas are disjoint with room to grow (`Src/main.c:462-473`, `:515-526`). |
+| IWDG1 | LSI 32 kHz nominal, prescaler /16 (2 kHz tick), reload 1000: 1000 x 16 / 32000 Hz = **0.500 s**, no window (`Src/main.c:603-605`). The LSI spread (about +-30 %) makes the real timeout roughly 0.35 to 0.7 s. Started in `MX_IWDG1_Init`; refreshed provisionally in the default FreeRTOS task loop (`Src/main.c:1007`, every 100 ms). The heartbeat/watchdog module owns the refresh in T13. |
+| HSE clock security (CSS) | `HAL_RCC_EnableCSS()` (`Src/main.c:271`). The NMI handler calls `HAL_RCC_NMI_IRQHandler()` (`Src/stm32h7xx_it.c:77`, USER CODE), which clears the flag and calls `HAL_RCC_CSSCallback` -> `Error_Handler` (`Src/main.c:986`). |
+| `Error_Handler` | Disables IRQs, drives PD11/PD3/PD4 (SPI1 chip selects) high through GPIOD BSRR (GPIOD clock forced on), then `NVIC_SystemReset()` (`Src/main.c:1068-1077`). No spin. After the reset the pins are in analog mode until `MX_GPIO_Init` (the BSRR write before it only preloads ODR), so the CS lines need external pull-ups (hardware item, add to `h743-pin-plan.md`), and both CAN transceivers need a TXD pull-up. |
+| FreeRTOS | Default task statically allocated (`Src/freertos.c`, `defaultTaskBuffer` / `defaultTaskControlBlock`). `configCHECK_FOR_STACK_OVERFLOW 2` (`Inc/FreeRTOSConfig.h:79`) with `vApplicationStackOverflowHook` -> `Error_Handler` (`Src/freertos.c:59-66`). **Dynamic allocation stays on**, see the open list. |
+| SDMMC1 | `MX_SDMMC1_SD_Init` is generated but not called from `main` ("do not generate function call" in the `.ioc` function list), so a missing card cannot stop the boot. `ClockDiv = 2`: card clock = 80 MHz / (2 x 2) = **20 MHz** (<= 25 MHz default speed) (`Src/main.c:636`). Card init moves to a task in T13; a failure there is non-fatal. |
+| SPI1 | Prescaler /32 from the 80 MHz kernel clock = **2.5 Mbit/s** (<= 5 MHz device limit, `Src/main.c:670`; /16 would sit exactly on the limit). |
+| ADC1, ADC3 | Sampling time 64.5 cycles (`ADC_SAMPLETIME_64CYCLES_5`, `Src/main.c:354`, `:418`). Revisit with the real source impedance. |
+
+`src/hal/can_timing.h` (pure C, header-only `static inline`, no MISRA deviation, host-tested in `tests/host/test_can_timing.c`) checks the timing arithmetic: `can_timing_ok(kernel_hz, prescaler, seg1, seg2, sjw, VEHICLE_CL250_BITRATE)` is true only when every value is inside its FDCAN NBTP range (prescaler 1-512, seg1 1-256, seg2 1-128, 1 <= SJW <= seg2), the rate is exact and the sample point lies in 75 to 90 %. This image is not wired to `src/` yet: **T13 calls `can_timing_ok` before `HAL_FDCAN_Start`** for both controllers.
 
 ## Open
 
-- FDCAN nominal/data bit timing (500 kbit/s) is not configured yet.
-- SDMMC clock divider, ADC sampling times, TIM3/TIM4 periods, I2C timing, SPI1 parameters, UART baud rates: CubeMX defaults.
-- FreeRTOS: one default task, CubeMX defaults; the platform tasks come with T13.
+- TIM3/TIM4 periods, I2C timing, UART baud rates: CubeMX defaults.
+- FreeRTOS: one default task; the platform tasks come with T13.
 - MPU and the linker script are the CubeMX defaults (red zone: need a `safety-reviewer` pass before they are final).
-- No IWDG is configured (nothing in `rt-core.ioc` or `Src/main.c`).
-- FreeRTOS uses `heap_4.c` with dynamic allocation enabled (`Inc/FreeRTOSConfig.h:63` `configSUPPORT_DYNAMIC_ALLOCATION 1`, `:72` `configTOTAL_HEAP_SIZE` 15360); the project also links the newlib `_sbrk` heap (`Src/sysmem.c:54`, `_Min_Heap_Size 0x200` at `STM32H743xx_FLASH.ld:70`). Invariant 5 wants neither on safety paths.
-- `Error_Handler` (`Src/main.c:1019`) disables IRQs and spins forever, with no safe state and no reset path.
-- SPI1 chip selects PD11 `CS_EGT`, PD3 `CS_ADXL_ARM`, PD4 `CS_ADXL_ENG` now start high (`Src/main.c:920`, before the pins become outputs); they were low at boot in the first image.
+- FreeRTOS still uses `heap_4.c` with dynamic allocation enabled (`Inc/FreeRTOSConfig.h:63` `configSUPPORT_DYNAMIC_ALLOCATION 1`, `:72` `configTOTAL_HEAP_SIZE` 15360); the project also links the newlib `_sbrk` heap (`Src/sysmem.c:54`, `_Min_Heap_Size 0x200` at `STM32H743xx_FLASH.ld:70`). Invariant 5 wants neither on safety paths. CubeMX does not offer a static-only setting with the CMSIS_V2 interface (its `MEMORY_ALLOCATION` parameter offers only "Dynamic / Static"; a value written into the `.ioc` is ignored). `cmsis_os2.c` itself handles `configSUPPORT_DYNAMIC_ALLOCATION 0` (it checks the macro); what blocks it in this image is the generated `heap_4.c` (`#error` without dynamic allocation) and the generated CMake that always compiles it. Dropping `heap_4.c` from the build and setting the macro to 0 is a T13 step (with `configUSE_MALLOC_FAILED_HOOK 1` -> `Error_Handler` until then).
+- `Error_Handler` now resets the MCU (see the settings table). `SPI1` chip selects PD11 `CS_EGT`, PD3 `CS_ADXL_ARM`, PD4 `CS_ADXL_ENG` start high (`Src/main.c`, `MX_GPIO_Init`, before the pins become outputs); they were low at boot in the first image.
 
 ## Must fix before first power-on (safety review 2026-11-27)
 
-Recorded, not implemented. Line numbers refer to the generated files in this folder.
+Line numbers refer to the generated files in this folder. Items closed by T6b (2026-11-27, values PROVISIONAL, see the settings table) are ticked.
 
-- [ ] FDCAN1 nominal timing is the CubeMX default: 80 MHz / 16 prescaler / 3 tq = about 1.67 Mbit/s, `FDCAN_MODE_NORMAL` (`Src/main.c:437`, `:441-444`). It must be 500 kbit/s from `vehicle-defs`, with a boot-time check of NBTP before `HAL_FDCAN_Start` (not called anywhere yet), and first bring-up in bus-monitoring mode (invariant 1: the vehicle bus has one read-only tester).
-- [ ] FDCAN2 has the same default timing (`Src/main.c:490`, `:494-497`).
-- [ ] FDCAN1 and FDCAN2 both use `MessageRAMOffset = 0`, so their message RAM areas overlap (`Src/main.c:449`, `:502`).
-- [ ] `HAL_SD_Init` failure calls `Error_Handler` (`Src/main.c:595-598`), so a missing SD card stops the node from booting. Make SD init non-fatal and run it from a task.
-- [ ] SDMMC `ClockDiv = 0` runs the card at 80 MHz, out of spec (`Src/main.c:594`).
-- [ ] `.data` and `.bss` are placed in DTCM (`STM32H743xx_FLASH.ld:169`, `:227`), which DMA1 cannot reach (ADC1, ADC3, TIM3_CH1 on DMA1 streams, `Src/stm32h7xx_hal_msp.c:131`). Place the DMA buffers in AXI or D2 SRAM and add a non-cacheable MPU region (`Src/main.c:966`) before enabling the D-cache.
-- [ ] No IWDG and no HSE clock-security (CSS) handling.
-- [ ] FreeRTOS allocation is dynamic (see Open) and `_sbrk` (`Src/sysmem.c:54`) can succeed. Move to static allocation (`configSUPPORT_DYNAMIC_ALLOCATION 0`) and make `_sbrk` fail.
-- [ ] SPI1 runs at 40 Mbit/s (`SPI_BAUDRATEPRESCALER_2`, `Src/main.c:628`), above the 5 MHz device limit.
-- [ ] ADC sampling time is 1.5 cycles on ADC1 and ADC3 (`Src/main.c:341`, `:405`); choose it from the source impedance.
-- [ ] `configCHECK_FOR_STACK_OVERFLOW` is not defined in `Inc/FreeRTOSConfig.h` (default 0); set it to 2 and provide `vApplicationStackOverflowHook`.
-
+- [x] FDCAN1 nominal timing 500 kbit/s (prescaler 10, seg1 13, seg2 2, SJW 2) and bus-monitoring mode for the first bring-up (`Src/main.c:450`, `:454-457`). Still open inside this item: the boot-time NBTP check before `HAL_FDCAN_Start` (T13 calls `can_timing_ok`, which exists and is tested), and the switch to normal mode (T13/T26, after a listen-only capture with 0 error frames).
+- [x] FDCAN2 nominal timing, same values, normal mode (`Src/main.c:503`, `:507-510`).
+- [x] FDCAN1 and FDCAN2 message RAM areas are disjoint (offsets 0 and 1280, `Src/main.c:462`, `:515`).
+- [x] `HAL_SD_Init` can no longer stop the boot: `MX_SDMMC1_SD_Init` is not called from `main`. Still open: the T13 task that initialises the card must treat a failure as non-fatal.
+- [x] SDMMC `ClockDiv = 2`, 20 MHz card clock (`Src/main.c:636`).
+- [ ] `.data` and `.bss` are placed in DTCM (`STM32H743xx_FLASH.ld:169`, `:227`), which DMA1 cannot reach (ADC1, ADC3, TIM3_CH1 on DMA1 streams, `Src/stm32h7xx_hal_msp.c:131`). Place the DMA buffers in AXI or D2 SRAM and add a non-cacheable MPU region (`Src/main.c`, `MPU_Config`) before enabling the D-cache. Not done: it needs the linker script and MPU design, which belong to the DMA buffer owners (T13) and a `safety-reviewer` pass.
+- [x] IWDG1 enabled, 0.500 s (`Src/main.c:603-605`), provisional refresh in the default task (`:1007`); HSE CSS enabled (`:271`) with an NMI handler that ends in `Error_Handler`. Still open: the real refresh policy (T13 heartbeat/watchdog module).
+- [ ] FreeRTOS allocation is dynamic and `_sbrk` (`Src/sysmem.c:54`) can succeed. Partly done: the default task is static. Not done: `configSUPPORT_DYNAMIC_ALLOCATION 0` (CubeMX cannot with CMSIS_V2, see Open) and the `_sbrk` / `nm` gate that fails the build when `malloc`/`_sbrk` are linked (T13, with the native-API decision).
+- [x] SPI1 runs at 2.5 Mbit/s (`SPI_BAUDRATEPRESCALER_32`, `Src/main.c:670`).
+- [x] ADC sampling time 64.5 cycles on ADC1 and ADC3 (`Src/main.c:354`, `:418`); choose it from the real source impedance later.
+- [x] `configCHECK_FOR_STACK_OVERFLOW 2` and `vApplicationStackOverflowHook` -> `Error_Handler` (`Inc/FreeRTOSConfig.h:79`, `Src/freertos.c:59-66`).
+- [x] `Error_Handler` resets instead of spinning (see the settings table).
+- [x] NMI: a non-CSS NMI (or a returning CSS callback) calls `Error_Handler` instead of spinning (`Src/stm32h7xx_it.c`); debug builds freeze IWDG1 while the core is halted (`__HAL_DBGMCU_FREEZE_IWDG1()`, `Src/main.c` USER CODE SysInit).
+- [ ] Message RAM reservation for `src/hal/README.md`: FDCAN2 up to 8 dedicated TX buffers and RX FIFO1 for UDS 0x7xx, FDCAN1 one dedicated TX buffer (both still fit below the 1280-word split). T13 with the FDCAN port.
+- [ ] Reset cause: read and clear `RCC->RSR` at boot and report it (a missing HSE now reset-loops about every 100 ms, `HSE_STARTUP_TIMEOUT`, silently). T13.
+- [ ] Watchdog refresh from `services/alive` once every task is alive (not from the default task). T13.
+- [ ] FDCAN kernel clock checked at run time (`HAL_RCCEx_GetPeriphCLKFreq`) and passed to `can_timing_ok()` with the NBTP read-back (prescaler, seg1, seg2, SJW) before `HAL_FDCAN_Start`; the platform bus has no gen/ bit-rate constant yet (defs follow-up). T13.
+- [ ] HIL: `vehicle_bus_monitor_no_dominant` (scope TXD/CANH during boot, a reset loop and an ECU frame: no ACK from rt-core), `iwdg_task_hang` (stalled default task resets in 0.47-0.54 s), `hse_loss_css` (MCO removed: CS lines high, no dominant bits on either bus). T26.
