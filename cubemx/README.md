@@ -55,4 +55,24 @@ The FDCAN bit timing, SDMMC divider and every other peripheral parameter are at 
 - SDMMC clock divider, ADC sampling times, TIM3/TIM4 periods, I2C timing, SPI1 parameters, UART baud rates: CubeMX defaults.
 - FreeRTOS: one default task, CubeMX defaults; the platform tasks come with T13.
 - MPU and the linker script are the CubeMX defaults (red zone: need a `safety-reviewer` pass before they are final).
+- No IWDG is configured (nothing in `rt-core.ioc` or `Src/main.c`).
+- FreeRTOS uses `heap_4.c` with dynamic allocation enabled (`Inc/FreeRTOSConfig.h:63` `configSUPPORT_DYNAMIC_ALLOCATION 1`, `:72` `configTOTAL_HEAP_SIZE` 15360); the project also links the newlib `_sbrk` heap (`Src/sysmem.c:54`, `_Min_Heap_Size 0x200` at `STM32H743xx_FLASH.ld:70`). Invariant 5 wants neither on safety paths.
+- `Error_Handler` (`Src/main.c:1019`) disables IRQs and spins forever, with no safe state and no reset path.
+- SPI1 chip selects PD11 `CS_EGT`, PD3 `CS_ADXL_ARM`, PD4 `CS_ADXL_ENG` now start high (`Src/main.c:920`, before the pins become outputs); they were low at boot in the first image.
+
+## Must fix before first power-on (safety review 2026-11-27)
+
+Recorded, not implemented. Line numbers refer to the generated files in this folder.
+
+- [ ] FDCAN1 nominal timing is the CubeMX default: 80 MHz / 16 prescaler / 3 tq = about 1.67 Mbit/s, `FDCAN_MODE_NORMAL` (`Src/main.c:437`, `:441-444`). It must be 500 kbit/s from `vehicle-defs`, with a boot-time check of NBTP before `HAL_FDCAN_Start` (not called anywhere yet), and first bring-up in bus-monitoring mode (invariant 1: the vehicle bus has one read-only tester).
+- [ ] FDCAN2 has the same default timing (`Src/main.c:490`, `:494-497`).
+- [ ] FDCAN1 and FDCAN2 both use `MessageRAMOffset = 0`, so their message RAM areas overlap (`Src/main.c:449`, `:502`).
+- [ ] `HAL_SD_Init` failure calls `Error_Handler` (`Src/main.c:595-598`), so a missing SD card stops the node from booting. Make SD init non-fatal and run it from a task.
+- [ ] SDMMC `ClockDiv = 0` runs the card at 80 MHz, out of spec (`Src/main.c:594`).
+- [ ] `.data` and `.bss` are placed in DTCM (`STM32H743xx_FLASH.ld:169`, `:227`), which DMA1 cannot reach (ADC1, ADC3, TIM3_CH1 on DMA1 streams, `Src/stm32h7xx_hal_msp.c:131`). Place the DMA buffers in AXI or D2 SRAM and add a non-cacheable MPU region (`Src/main.c:966`) before enabling the D-cache.
+- [ ] No IWDG and no HSE clock-security (CSS) handling.
+- [ ] FreeRTOS allocation is dynamic (see Open) and `_sbrk` (`Src/sysmem.c:54`) can succeed. Move to static allocation (`configSUPPORT_DYNAMIC_ALLOCATION 0`) and make `_sbrk` fail.
+- [ ] SPI1 runs at 40 Mbit/s (`SPI_BAUDRATEPRESCALER_2`, `Src/main.c:628`), above the 5 MHz device limit.
+- [ ] ADC sampling time is 1.5 cycles on ADC1 and ADC3 (`Src/main.c:341`, `:405`); choose it from the source impedance.
+- [ ] `configCHECK_FOR_STACK_OVERFLOW` is not defined in `Inc/FreeRTOSConfig.h` (default 0); set it to 2 and provide `vApplicationStackOverflowHook`.
 

@@ -59,10 +59,16 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define CS_EGT_Pin GPIO_PIN_11
+#define CS_EGT_GPIO_Port GPIOD
 #define JTMS_Pin GPIO_PIN_13
 #define JTMS_GPIO_Port GPIOA
 #define JTCK_Pin GPIO_PIN_14
 #define JTCK_GPIO_Port GPIOA
+#define CS_ADXL_ARM_Pin GPIO_PIN_3
+#define CS_ADXL_ARM_GPIO_Port GPIOD
+#define CS_ADXL_ENG_Pin GPIO_PIN_4
+#define CS_ADXL_ENG_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */
 
