@@ -1,0 +1,19 @@
+# Pre-checks for ext/** branches of non-Claude AI tools (T71, D-071): edit zones, AI-Agent
+# trailer, session log. The logic lives in vehicle-workspace (scripts/ext_precheck.py).
+name: ext-precheck
+
+on:
+  push:
+    branches: ["ext/**"]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  precheck:
+    if: startsWith(github.head_ref || github.ref_name, 'ext/')
+    uses: vehicle-platform/vehicle-workspace/.github/workflows/ext-precheck.yml@5bc819cfb4f809057320dd2b506c1d00c7be360d # main 2026-11-28
+    with:
+      repo: vehicle-rt-core
