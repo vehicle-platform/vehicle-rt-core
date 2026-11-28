@@ -17,8 +17,9 @@
  *    running; an invalid sense never starts one and never cancels one (the timeout bounds it).
  *  - The low-voltage path only runs with KL15 on and the engine known to be stopped, so a
  *    weak charge at idle or a cranking dip never halts the Pi while riding.
- *  - HOLD is also asserted while KL15 is valid and on, whatever the phase; a debounced KL15
- *    on returns DONE to RUNNING (logs reopen). A corrupted phase value is treated as a
+ *  - HOLD is also asserted while KL15 is valid and on, whatever the phase; only a real key
+ *    cycle (KL15 off for the debounce, then on for the debounce, after the sequence started)
+ *    returns DONE to RUNNING (logs reopen); for low voltage also an engine start. A corrupted phase value is treated as a
  *    new bounded shutdown.
  *  - Hardware must still cap HOLD (retriggerable) so an rt-core reset loop cannot hold the
  *    supply indefinitely: glue/hardware card, not this module.
@@ -45,6 +46,9 @@ extern "C" {
  * is PROVISIONAL. */
 #define KEYOFF_LOW_VOLTAGE_MV 12200u
 #define KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS 10000u
+/* A low-voltage sequence is cancelled before HALTING once the battery recovers to this level
+ * (hysteresis above KEYOFF_LOW_VOLTAGE_MV; provisional until T73). */
+#define KEYOFF_LOW_VOLTAGE_RECOVER_MV 12600u
 
 /* A KL15 level must hold this long before it counts (connector glitch, cranking brown-out).
  * PROVISIONAL. */
@@ -61,17 +65,23 @@ typedef struct {
     uint8_t reason;           /* PLATFORM_SHUTDOWN_REQUEST_SHUTDOWN_REASON_*_CHOICE */
     uint8_t request_id;       /* incremented once per shutdown sequence, 4 bit */
     bool halting_seen;        /* the Pi acknowledged HALTING for this sequence */
+    bool seen_off;            /* KL15 read valid and off since the sequence started: a later
+                               * debounced key-on is a real key cycle (edge), not a level */
     bool low_active;          /* the battery sample is below the cut-off */
-    bool off_active;          /* KL15 valid and low */
+    bool off_active;          /* KL15 valid and low, engine not running (key-off start) */
+    bool cyc_off_active;      /* KL15 valid and low (the off half of a key cycle, no veto) */
     bool on_active;           /* KL15 valid and high */
     uint32_t off_since_ms;
+    uint32_t cyc_off_since_ms;
     uint32_t on_since_ms;
     uint32_t sequence_ms;     /* time the current sequence started */
     uint32_t low_since_ms;    /* time the sample first fell below the cut-off */
 } keyoff_t;
 
 typedef struct {
-    bool kl15_valid;          /* false until the KL15 sense is measured: reads as key-on */
+    bool kl15_valid;          /* false until the KL15 sense is measured: never starts or cancels
+                               * a sequence; in DONE an invalid sense releases HOLD (the real
+                               * KL15 still holds the supply through the diode-OR) */
     bool kl15_on;
     bool engine_running;      /* engine speed valid and above zero: vetoes a key-off */
     bool engine_stopped;      /* engine speed valid and zero; unknown = false: no low-voltage trip */

@@ -318,6 +318,191 @@ static void test_a_corrupted_phase_is_bounded(void)
     TEST_ASSERT_FALSE(out.hold);
 }
 
+/* Round 2 MAJOR-1: at a realistic 10 ms cadence a low-voltage sequence starts once, keeps its
+ * request and id, and is not cancelled by the KL15 level that was on all along. */
+static void test_low_voltage_at_a_real_cadence_starts_once_and_holds_its_request(void)
+{
+    uint32_t t;
+    uint32_t starts = 0u;
+    uint8_t id = 0u;
+    bool was_shutdown = false;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= 60000u; t += 10u) {
+        step(t);
+        const bool shutdown = (out.request == REQ_SHUTDOWN);
+        if (shutdown && !was_shutdown) {
+            starts++;
+            id = out.request_id;
+        }
+        if (was_shutdown) {
+            TEST_ASSERT_TRUE(shutdown);
+            TEST_ASSERT_EQUAL_UINT8(id, out.request_id);
+            TEST_ASSERT_EQUAL_UINT8(REASON_LOW, out.reason);
+        }
+        was_shutdown = shutdown;
+    }
+    TEST_ASSERT_EQUAL_UINT32(1u, starts);
+}
+
+static void test_low_voltage_done_is_latched_while_nothing_changes(void)
+{
+    uint32_t t;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS + 20u; t += 10u) {
+        step(t);
+    }
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+    in.ack_fresh = true;
+    in.ack_id = out.request_id;
+    in.ack_state = ACK_READY;
+    for (; t <= 60000u; t += 10u) {
+        step(t);
+        TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request); /* DONE keeps asking, never RUNNING */
+        TEST_ASSERT_EQUAL_UINT8(0u, out.deadline_s);
+    }
+    in.engine_stopped = false;
+    in.engine_running = true; /* the rider starts the engine: reopen */
+    step(t);
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+}
+
+static void test_low_voltage_before_halting_is_cleared_by_engine_or_recovery(void)
+{
+    uint32_t t;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS + 20u; t += 10u) {
+        step(t);
+    }
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+    in.battery_mv = KEYOFF_LOW_VOLTAGE_RECOVER_MV - 1u; /* above the cut-off, below hysteresis */
+    step(t + 10u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+    in.battery_mv = KEYOFF_LOW_VOLTAGE_RECOVER_MV;
+    step(t + 20u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+}
+
+static void test_low_voltage_after_halting_is_not_cleared(void)
+{
+    uint32_t t;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS + 20u; t += 10u) {
+        step(t);
+    }
+    in.ack_fresh = true;
+    in.ack_id = out.request_id;
+    in.ack_state = ACK_HALTING;
+    step(t + 10u);
+    in.battery_mv = 13800u;
+    step(t + 20u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+}
+
+static void test_key_cycle_during_a_low_voltage_sequence_cancels(void)
+{
+    uint32_t t;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS + 20u; t += 10u) {
+        step(t);
+    }
+    in.kl15_on = false; /* off for the debounce: the off half of a real key cycle */
+    step(t + 10u);
+    step(t + 10u + KEYOFF_KEY_DEBOUNCE_MS);
+    in.kl15_on = true;
+    step(t + 20u + KEYOFF_KEY_DEBOUNCE_MS);
+    step(t + 20u + (2u * KEYOFF_KEY_DEBOUNCE_MS));
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+}
+
+static void test_key_off_debounce_boundary_at_a_real_cadence(void)
+{
+    uint32_t t;
+    in.kl15_on = false;
+    for (t = 0u; t < KEYOFF_KEY_DEBOUNCE_MS; t += 10u) {
+        step(t);
+        TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+    }
+    step(KEYOFF_KEY_DEBOUNCE_MS);
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+}
+
+static uint32_t low_voltage_sequence(void)
+{
+    uint32_t t;
+    in.battery_mv = 11800u;
+    for (t = 0u; t <= KEYOFF_LOW_VOLTAGE_DEBOUNCE_MS + 20u; t += 10u) {
+        step(t);
+    }
+    return t;
+}
+
+/* Round 3 MINOR-A: a single 10 ms KL15-off sample is a glitch, not a key cycle. */
+static void test_a_short_kl15_off_glitch_is_not_a_key_cycle_in_a_low_voltage_sequence(void)
+{
+    uint32_t t = low_voltage_sequence();
+    const uint8_t id = out.request_id;
+    in.kl15_on = false;
+    step(t);
+    in.kl15_on = true;
+    for (t += 10u; t <= 30000u; t += 10u) {
+        step(t);
+        TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+        TEST_ASSERT_EQUAL_UINT8(id, out.request_id);
+    }
+}
+
+static void test_key_cycle_off_half_debounce_boundary(void)
+{
+    uint32_t t = low_voltage_sequence();
+    uint32_t end;
+    in.kl15_on = false;
+    for (end = t + KEYOFF_KEY_DEBOUNCE_MS - 10u; t < end; t += 10u) {
+        step(t); /* 490 ms off */
+    }
+    in.kl15_on = true;
+    for (end = t + KEYOFF_KEY_DEBOUNCE_MS + 10u; t <= end; t += 10u) {
+        step(t);
+    }
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request); /* not a key cycle */
+    in.kl15_on = false;
+    for (end = t + KEYOFF_KEY_DEBOUNCE_MS; t <= end; t += 10u) {
+        step(t); /* 500 ms off */
+    }
+    in.kl15_on = true;
+    for (end = t + KEYOFF_KEY_DEBOUNCE_MS; t <= end; t += 10u) {
+        step(t);
+    }
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request); /* a real key cycle cancels */
+}
+
+static void test_a_corrupted_phase_with_kl15_on_returns_to_running(void)
+{
+    step(0u);
+    step(KEYOFF_KEY_DEBOUNCE_MS);
+    const uint8_t id = out.request_id;
+    k.phase = (keyoff_phase_t)7;
+    step(KEYOFF_KEY_DEBOUNCE_MS + 10u);
+    step(KEYOFF_KEY_DEBOUNCE_MS + 20u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+    TEST_ASSERT_EQUAL_UINT8((uint8_t)((id + 1u) & 0x0Fu), out.request_id);
+}
+
+static void test_low_voltage_recovery_hysteresis_boundary(void)
+{
+    uint32_t t = low_voltage_sequence();
+    in.battery_valid = false;
+    in.battery_mv = 14000u; /* an invalid high sample never clears */
+    step(t);
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+    in.battery_valid = true;
+    in.battery_mv = KEYOFF_LOW_VOLTAGE_RECOVER_MV - 1u;
+    step(t + 10u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_SHUTDOWN, out.request);
+    in.battery_mv = KEYOFF_LOW_VOLTAGE_RECOVER_MV;
+    step(t + 20u);
+    TEST_ASSERT_EQUAL_UINT8(REQ_NONE, out.request);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -347,6 +532,16 @@ int main(void)
     RUN_TEST(test_low_voltage_shutdown_is_bounded_too);
     RUN_TEST(test_key_off_wins_over_low_voltage_reason);
     RUN_TEST(test_a_corrupted_phase_is_bounded);
+    RUN_TEST(test_low_voltage_at_a_real_cadence_starts_once_and_holds_its_request);
+    RUN_TEST(test_low_voltage_done_is_latched_while_nothing_changes);
+    RUN_TEST(test_low_voltage_before_halting_is_cleared_by_engine_or_recovery);
+    RUN_TEST(test_low_voltage_after_halting_is_not_cleared);
+    RUN_TEST(test_key_cycle_during_a_low_voltage_sequence_cancels);
+    RUN_TEST(test_key_off_debounce_boundary_at_a_real_cadence);
+    RUN_TEST(test_a_short_kl15_off_glitch_is_not_a_key_cycle_in_a_low_voltage_sequence);
+    RUN_TEST(test_key_cycle_off_half_debounce_boundary);
+    RUN_TEST(test_a_corrupted_phase_with_kl15_on_returns_to_running);
+    RUN_TEST(test_low_voltage_recovery_hysteresis_boundary);
     (void)ACK_NONE;
     return UNITY_END();
 }
