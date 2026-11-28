@@ -10,3 +10,4 @@ misra-c2012-8.7:src/services/vehicle_signals.c
 misra-c2012-8.7:src/services/diag.c
 misra-c2012-8.7:src/features/uds/uds_server.c
 misra-c2012-8.7:src/features/uds/uds_server_core.c
+misra-c2012-8.7:src/features/power/keyoff_core.c

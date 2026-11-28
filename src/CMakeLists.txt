@@ -8,6 +8,7 @@ add_library(vehicle_rtcore_logic STATIC
     features/vehicle_republish/vehicle_republish_core.c
     features/heartbeat/heartbeat_core.c
     features/safety_hb/safety_hb_core.c
+    features/power/keyoff_core.c
     hal/can_frame.c
     services/can_sm_core.c
     services/com_core.c
