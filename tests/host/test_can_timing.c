@@ -1,9 +1,10 @@
 /*
  * L0 tests for hal/can_timing (pure FDCAN nominal bit-timing arithmetic): the cubemx/ image
- * values against the generated vehicle bit rate, a wrong prescaler, the FDCAN field ranges,
+ * values against the generated vehicle and platform bit rates, a wrong prescaler, the FDCAN field ranges,
  * the SJW rule, the sample-point window and the 64-bit product.
  */
 #include "hal/can_timing.h"
+#include "platform.h"
 #include "vehicle_cl250.h"
 
 #include <stdint.h>
@@ -27,6 +28,15 @@ static void test_image_values_give_vehicle_bitrate(void)
                              can_timing_bitrate(KERNEL_HZ, NOM_PRESCALER, NOM_SEG1, NOM_SEG2));
     TEST_ASSERT_TRUE(can_timing_ok(KERNEL_HZ, NOM_PRESCALER, NOM_SEG1, NOM_SEG2, NOM_SJW,
                                    VEHICLE_CL250_BITRATE));
+}
+
+/* FDCAN2 (platform bus) uses the same image timing (D-009), checked against its own constant. */
+static void test_image_values_give_platform_bitrate(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(PLATFORM_BITRATE,
+                             can_timing_bitrate(KERNEL_HZ, NOM_PRESCALER, NOM_SEG1, NOM_SEG2));
+    TEST_ASSERT_TRUE(can_timing_ok(KERNEL_HZ, NOM_PRESCALER, NOM_SEG1, NOM_SEG2, NOM_SJW,
+                                   PLATFORM_BITRATE));
 }
 
 static void test_cubemx_default_is_rejected(void)
@@ -151,6 +161,7 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_image_values_give_vehicle_bitrate);
+    RUN_TEST(test_image_values_give_platform_bitrate);
     RUN_TEST(test_cubemx_default_is_rejected);
     RUN_TEST(test_wrong_prescaler);
     RUN_TEST(test_inexact_rate_is_rejected_but_reported_truncated);

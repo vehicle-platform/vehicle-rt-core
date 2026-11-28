@@ -9,6 +9,7 @@
 #include "main.h"
 
 #include "hal/reset_cause.h"
+#include "platform.h"
 #include "vehicle_cl250.h"
 
 #include <stdbool.h>
@@ -114,12 +115,12 @@ uint32_t boot_fault_hfsr(void);
  * can_timing_nbtp_ok() (hal/can_timing.h) with the expected bit rate. False for a wrong
  * clock tree, a wrong or unprogrammed NBTP, or an unreadable clock.
  *
- * The vehicle bus uses the generated VEHICLE_CL250_BITRATE. The platform bus has no generated
- * bit-rate constant (defs follow-up); both buses are 500 kbit/s (D-009, src/hal/README.md), so
- * FDCAN2 is checked against the same value until defs has its own.
+ * Each bus uses its generated constant: FDCAN1 (vehicle bus) VEHICLE_CL250_BITRATE, FDCAN2
+ * (platform bus) PLATFORM_BITRATE (vehicle-defs gen/c/rt_core, dbc/platform.dbc Baudrate). Both
+ * are 500 kbit/s today (D-009, src/hal/README.md).
  */
 #define BOOT_FDCAN1_EXPECTED_BPS VEHICLE_CL250_BITRATE
-#define BOOT_FDCAN2_EXPECTED_BPS VEHICLE_CL250_BITRATE
+#define BOOT_FDCAN2_EXPECTED_BPS PLATFORM_BITRATE
 
 bool boot_fdcan_timing_ok(const FDCAN_HandleTypeDef *hfdcan, uint32_t expected_bps);
 

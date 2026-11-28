@@ -62,7 +62,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     User
     # Pure HAL-free headers shared with the host tests (hal/can_timing.h, hal/reset_cause.h)
     ${CMAKE_CURRENT_SOURCE_DIR}/../src
-    # Generated vehicle constants (VEHICLE_CL250_BITRATE); the submodule is pinned by the repo
+    # Generated bus constants (VEHICLE_CL250_BITRATE, PLATFORM_BITRATE); the submodule is pinned by the repo
     ${CMAKE_CURRENT_SOURCE_DIR}/../external/vehicle-defs/gen/c/rt_core
 )
 
