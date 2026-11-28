@@ -59,12 +59,17 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 - **Untrusted text stays quoted on every path.** Rider-written or other free text (notes, complaints) is shown only as quoted, sanitised text (control and Unicode format characters removed, the quote character replaced) and never reaches an LLM prompt. Trace the value past the render: storage, conversation history and recent-turn context, caches, exports.
 - **Examples in docs must work.** An example scenario, config or command must be able to produce the result it claims with the numbers it quotes (durations against sustain times, preconditions such as engine running); identifiers in examples exist in vehicle-defs or the code; "observed" only for something measured, with its source, otherwise "expected".
 - **Run every CI step locally,** including test type-checks and build steps, not only the test command; read the repo's workflow files to see what CI runs.
-- **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers; label synthetic data `Provenance: synthetic`.
+- **Public results pages:** no usernames, `/Users/...` paths, hostnames, tokens or raw model answers (also not in committed raw JSON: drop the `answer` field, keep scores, ids and timings); label synthetic data `Provenance: synthetic`.
+- **Sensitive values are named, not quoted.** A document that lists vehicle-specific or sensitive content (D-135) names the kind and the file ("the UDS physical CAN IDs in `uds/vehicle_cl250.yaml`"), never the literal IDs, DIDs or payloads.
+- **Repeats are not samples.** Runs of a deterministic replay that give identical numbers are one configuration repeated, not independent samples: say n = 1 for those figures and never call them "independent" or "confirming"; every figure comes from a committed file or is marked "from a local log, not committed".
 - **Updating a doc never deletes still-true content.** Condense or move it; list every removed fact in the PR body with the reason (the code no longer does it, with the file). Copied paths, flags and rule sentences are checked against their source, never reworded into a different rule.
 - **Never discard what the user chose or typed.** A timeout, auto-close, retry or navigation keeps or submits the user's choice and text; it never drops it silently.
 - **Totals over the full data, each value once.** Counts are computed before a list is truncated; a quantity is not repeated as a raw field next to it; a missing input becomes a `warnings` entry, never a silent null; an unknown category is its own bucket.
 - **A scripted multi-step run stops at the first failed step** (conversation, retry chain, migration) and marks the rest as not run; cleanup in `finally` never masks the original error.
 - **Diagram and topology facts are checked per arrow** against the code or the DBC: who transmits on which bus, which services a node sends.
+- **Edit data files in their own format.** Add items to a JSON/YAML/ARB file in the style the file already uses; never re-serialise it (a diff that reformats untouched lines is a finding).
+- **Coverage claims are read, not guessed.** "Tested" names a test whose assertions check the requirement; before writing "untested" or "no test exists", grep the tests and the CI workflows of every repo that could hold one.
+- **Results pages are reproducible.** Every command is complete and runnable (no `...`), and every figure from a file that is not committed (a deleted raw JSON, a local log) is marked "from a local log, not committed".
 
 ## 4. Workflow
 
@@ -74,6 +79,7 @@ You are an AI coding tool (Codex, Gemini, DeepSeek, Cursor, Aider, Copilot, …)
 4. Before each commit: run the repo's checks (table below) and `python3 scripts/check_zones.py <repo>`. Red → revert those paths. Commit and push only when the user asks.
 5. PR (when the user asks): title in Conventional Commits form; description = summary, checks run with their result, the zone result, `needs-claude-review` if any path is yellow, and the log file name.
 6. Write code that reads like the surrounding code: same naming, comment density, test style. Add or update tests for what you change.
+7. `ext/**` branches are pre-checked in CI (`ext-precheck`, `scripts/ext_precheck.py`): red-zone paths, the `AI-Agent:` trailer on every commit and a session log listing the branch; a yellow zone needs the `needs-claude-review` PR label.
 
 | Repo | Checks (run from the repo root) |
 |---|---|
